@@ -14,7 +14,7 @@ jobs:
     name: 脚本语法解析
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 用 PowerShell 解析器逐文件检查
         shell: pwsh
@@ -46,7 +46,7 @@ jobs:
     name: BOM 与换行检查
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 确认每个 .ps1 都是 UTF-8 with BOM
         shell: pwsh
@@ -75,7 +75,7 @@ jobs:
     name: PSScriptAnalyzer
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装并运行
         shell: pwsh
@@ -94,9 +94,9 @@ jobs:
     name: SKILL.md 格式校验
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
