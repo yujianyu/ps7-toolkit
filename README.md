@@ -12,8 +12,6 @@
 
 ## 这个工具是干什么的
 
-**它主要是给 AI 助手用的，不只是给人用的。**
-
 现在你在 WorkBuddy、DeepSeek DSH、豆包、千问这些 AI 客户端里让它跑个命令、处理批文件、搜点东西，它在 Windows 上调的是系统自带的 **Windows PowerShell 5.1** —— 一个 2009 年的老引擎。于是就经常出现这些情况：
 
 - 脚本里带中文注释，直接报「字符串缺少终止符」
@@ -47,7 +45,9 @@
 
 ---
 
-## 第一步：先自己装好 PowerShell 7（推荐）
+## 使用教程
+
+### 第一步：先自己装好 PowerShell 7（推荐）
 
 **官方下载地址：<https://github.com/PowerShell/PowerShell/releases>**
 
@@ -74,7 +74,7 @@ pwsh -v
 
 ---
 
-## 第二步：装 Rust 工具链与默认配置
+### 第二步：装 Rust 工具链与默认配置
 
 打开 **PowerShell**（开始菜单搜 PowerShell 就行，5.1 也可以），执行：
 
@@ -89,7 +89,7 @@ pwsh -v          # 应显示 7.x
 rg --version     # 应显示 ripgrep
 ```
 
-### 已经装好 PowerShell 7 了？
+#### 已经装好 PowerShell 7 了？
 
 不用做任何额外操作。安装器会探测到已有版本并直接复用，只补 Rust 工具和默认配置。
 
