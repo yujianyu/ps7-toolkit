@@ -1,0 +1,154 @@
+name: 检查
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    name: 脚本语法解析
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 用 PowerShell 解析器逐文件检查
+        shell: pwsh
+        run: |
+          $failed = 0
+          $files = Get-ChildItem -Path scripts -Filter *.ps1 -Recurse
+          if ($files.Count -eq 0) {
+            Write-Host "没有找到 .ps1 文件"
+            exit 1
+          }
+          foreach ($f in $files) {
+            $tokens = $null
+            $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              $f.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors -and $errors.Count -gt 0) {
+              Write-Host "FAIL  $($f.Name)" -ForegroundColor Red
+              foreach ($e in $errors) {
+                Write-Host "      line $($e.Extent.StartLineNumber): $($e.Message)"
+              }
+              $failed = 1
+            } else {
+              Write-Host "OK    $($f.Name)" -ForegroundColor Green
+            }
+          }
+          if ($failed -ne 0) { exit 1 }
+
+  bom:
+    name: BOM 与换行检查
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 确认每个 .ps1 都是 UTF-8 with BOM
+        shell: pwsh
+        run: |
+          # Windows PowerShell 5.1 按 ANSI(GBK) 读脚本，缺 BOM 会让中文注释报
+          # 「字符串缺少终止符」，所以这个必须守住
+          $failed = 0
+          foreach ($f in Get-ChildItem -Path scripts -Filter *.ps1 -Recurse) {
+            $bytes = [System.IO.File]::ReadAllBytes($f.FullName)
+            $hasBom = $bytes.Length -ge 3 -and
+                      $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+            if ($hasBom) {
+              Write-Host "OK    $($f.Name) 有 BOM" -ForegroundColor Green
+            } else {
+              Write-Host "FAIL  $($f.Name) 缺少 UTF-8 BOM" -ForegroundColor Red
+              $failed = 1
+            }
+          }
+          if ($failed -ne 0) {
+            Write-Host ""
+            Write-Host "修复办法：用 UTF-8 with BOM 重新保存该文件"
+            exit 1
+          }
+
+  analyzer:
+    name: PSScriptAnalyzer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装并运行
+        shell: pwsh
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser -ErrorAction Stop
+          $results = Invoke-ScriptAnalyzer -Path scripts -Severity Error, ParseError
+          if ($results) {
+            $results | Format-Table RuleName, Severity, ScriptName, Line, Message -AutoSize |
+              Out-String -Width 200 | Write-Host
+            exit 1
+          }
+          Write-Host "没有 Error 级问题" -ForegroundColor Green
+
+  skill-md:
+    name: SKILL.md 格式校验
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 校验 frontmatter
+        run: |
+          python -m pip install --quiet pyyaml
+          python - <<'PY'
+          import re
+          import sys
+
+          import yaml
+
+          path = "SKILL.md"
+          text = open(path, encoding="utf-8").read()
+
+          m = re.match(r"^---\n(.*?)\n---", text, re.S)
+          if not m:
+              print("FAIL 找不到 YAML frontmatter")
+              sys.exit(1)
+
+          try:
+              data = yaml.safe_load(m.group(1))
+          except yaml.YAMLError as exc:
+              print("FAIL frontmatter 不是合法 YAML:", exc)
+              sys.exit(1)
+
+          errors = []
+
+          name = data.get("name")
+          if not name:
+              errors.append("缺少 name")
+          elif not re.fullmatch(r"[a-z0-9-]{1,64}", str(name)):
+              errors.append(f"name 必须是小写字母/数字/连字符，1-64 位，当前: {name}")
+
+          desc = data.get("description")
+          if not desc:
+              errors.append("缺少 description")
+          else:
+              if "<" in desc or ">" in desc:
+                  errors.append("description 不能含尖括号")
+              if len(desc) < 20:
+                  errors.append(f"description 太短（{len(desc)} 字）")
+
+          if not data.get("version"):
+              errors.append("缺少 version")
+
+          if errors:
+              for e in errors:
+                  print("FAIL", e)
+              sys.exit(1)
+
+          print(f"OK   name        = {name}")
+          print(f"OK   version     = {data.get('version')}")
+          print(f"OK   description = {len(desc)} 字")
+          PY

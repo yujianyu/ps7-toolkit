@@ -1,8 +1,39 @@
 # PowerShell 7 工具链（ps7-toolkit）
 
+[![检查](https://github.com/yujianyu/ps7-toolkit/actions/workflows/ci.yml/badge.svg)](https://github.com/yujianyu/ps7-toolkit/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/yujianyu/ps7-toolkit)](https://github.com/yujianyu/ps7-toolkit/releases/latest)
+[![License](https://img.shields.io/github/license/yujianyu/ps7-toolkit)](LICENSE)
+
 > Windows 上一键把 PowerShell 5.1 换成 PowerShell 7，顺带装上 6 个 Rust 高性能命令行工具，并根治中文乱码。
 
 不需要管理员权限，不需要 Python，不写死盘符，断网也能装。重复执行是安全的——只补缺失项，不会重复安装。
+
+---
+
+## 第一步：先自己装好 PowerShell 7（推荐）
+
+**官方下载地址：<https://github.com/PowerShell/PowerShell/releases>**
+
+打开上面的链接，翻到最新版本，在 **Assets** 里挑一个下载：
+
+| 选这个 | 适合谁 | 怎么装 |
+|---|---|---|
+| `PowerShell-7.x.x-win-x64.msi` | 大多数人 | 双击一路下一步。会自动装进 `Program Files` 并加好 PATH |
+| `PowerShell-7.x.x-win-x64.zip` | 不想装、要便携版 | 解压到任意目录（比如 `D:\Tools\ps7`），再把这个目录加进 PATH |
+
+> 不确定自己什么架构？Windows 10/11 绝大多数是 **x64**。ARM 设备（如骁龙本）选 `win-arm64`。
+
+装完**新开一个终端**验证：
+
+```powershell
+pwsh -v
+```
+
+能看到 `7.x.x` 就成功了。
+
+**装好之后再回来跑下面的脚本** —— 它会检测到你已经装了 PowerShell 7，直接复用，不会重复下载，只给你补上 Rust 工具和那些默认化配置。
+
+> 实在不想手动折腾？也可以跳过这一步，直接跑下面的安装脚本，它会自动把 PowerShell 7 下载并装好（内置了国内镜像加速，连不上 GitHub 也能装）。
 
 ---
 
@@ -20,7 +51,7 @@
 
 ---
 
-## 快速开始
+## 第二步：装 Rust 工具链与默认配置
 
 打开 **PowerShell**（开始菜单搜 PowerShell 就行，5.1 也可以），执行：
 
@@ -35,15 +66,15 @@ pwsh -v          # 应显示 7.x
 rg --version     # 应显示 ripgrep
 ```
 
-### 已经下好了安装包？
+### 已经装好 PowerShell 7 了？
 
-比自动下载更快更稳：
+不用做任何额外操作。安装器会探测到已有版本并直接复用，只补 Rust 工具和默认配置。
+
+想把已经下好但还没装的 zip 交给它处理（跳过自动搜索）：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ZipPath "D:\下载\PowerShell-7.6.7-win-x64.zip"
 ```
-
-安装包可从 [PowerShell 官方 Releases](https://github.com/PowerShell/PowerShell/releases) 下载，选 `PowerShell-7.x.x-win-x64.zip`。
 
 ---
 
