@@ -1,0 +1,247 @@
+# PowerShell 7 工具链（ps7-toolkit）
+
+> Windows 上一键把 PowerShell 5.1 换成 PowerShell 7，顺带装上 6 个 Rust 高性能命令行工具，并根治中文乱码。
+
+不需要管理员权限，不需要 Python，不写死盘符，断网也能装。重复执行是安全的——只补缺失项，不会重复安装。
+
+---
+
+## 它解决什么问题
+
+如果你在 Windows 上用过命令行，大概踩过这些坑：
+
+| 症状 | 原因 | 装完之后 |
+|---|---|---|
+| 中文输出变成 `鐗堟湰` 一堆乱码 | 5.1 默认编码是 ANSI/GBK | UTF-8 全局打通，所有调用 PowerShell 的软件都不乱码 |
+| 连不上 GitHub / 下载总是失败 | 5.1 默认用老 TLS，握手被拒 | 7 内置 TLS 1.2+，直连正常 |
+| 脚本里不能用 `&&`、`??`、`?:` | 5.1 不支持这些语法 | 全部可用 |
+| 处理大文件、大目录慢得离谱 | 5.1 跑在 .NET Framework 上 | 实测约快 1.9 倍 |
+| 搜代码用 `Select-String` 等到花儿谢 | 纯 PowerShell 实现 | 换 `rg`，实测快 11 倍 |
+
+---
+
+## 快速开始
+
+打开 **PowerShell**（开始菜单搜 PowerShell 就行，5.1 也可以），执行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1"
+```
+
+装完**重启终端**（让 PATH 生效），然后验证：
+
+```powershell
+pwsh -v          # 应显示 7.x
+rg --version     # 应显示 ripgrep
+```
+
+### 已经下好了安装包？
+
+比自动下载更快更稳：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ZipPath "D:\下载\PowerShell-7.6.7-win-x64.zip"
+```
+
+安装包可从 [PowerShell 官方 Releases](https://github.com/PowerShell/PowerShell/releases) 下载，选 `PowerShell-7.x.x-win-x64.zip`。
+
+---
+
+## 安装器是怎么找安装包的
+
+它不会傻等你在某个固定目录放文件，而是按这个顺序找：
+
+1. **先探测系统里已装的 pwsh** —— 扫 `Program Files\PowerShell\7`、用户目录、注册表 App Paths、PATH、scoop、chocolatey、Microsoft Store 版。
+   **找到就直接复用，绝不重复安装**（如果你已经用 MSI 装过，它只会补 Rust 工具和默认化配置）。
+2. 没找到，才找**本地 zip** —— Downloads / 桌面 / 下载 / 迅雷下载 / Documents / TEMP 都会翻一遍。
+3. 本地也没有，才**自动下载** ——
+   查 GitHub API 拿最新版本 → 三个国内镜像依次回退 → 微软官方 `aka.ms` 短链 → 内置版本表兜底（这一层保证**断网也能装**）。
+
+---
+
+## 常用参数
+
+| 参数 | 说明 |
+|---|---|
+| `-ZipPath <路径>` | 指定本地安装包，跳过自动搜索 |
+| `-ToolsRoot <路径>` | 自定义安装根目录，默认 `%LOCALAPPDATA%\ps7-toolkit` |
+| `-Mirror <URL>` | 自定义下载镜像，会插到内置镜像列表最前 |
+| `-SkipDefaults` | 只装不配，不动系统默认（不写 profile、不改注册表、不建快捷方式） |
+| `-SkipRustTools` | 只装 PowerShell 7，不装那 6 个 Rust 工具 |
+| `-CheckOnly` | 只体检，不做任何改动 |
+| `-Force` | 强制重装，忽略已安装检测 |
+
+例子——装到别的盘、只装主程序：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ToolsRoot "D:\Tools\ps7" -SkipRustTools
+```
+
+---
+
+## 装完怎么用
+
+### pwsh —— 主力 shell
+
+开始菜单里会有「PowerShell 7」。命令行里直接敲：
+
+```powershell
+pwsh
+```
+
+右击 `.ps1` 文件也会用 PowerShell 7 打开。Windows Terminal 和 VSCode 的默认终端也会被切成 PS7。
+
+### rg —— 极速内容检索（最值钱的一个）
+
+```powershell
+rg -n "关键词" .                          # 当前目录递归搜，显示行号
+rg -n -e "关键词" -g "*.py" C:\某目录     # 只搜 .py
+rg -i "关键词"                            # 忽略大小写
+rg -l "关键词"                            # 只列文件名
+rg --files -g "*.log" | rg -v "temp"     # 管道配合
+```
+
+自带 `.gitignore` 规则，不会去翻 `node_modules` 或 `.git`。
+
+### fd —— 找文件
+
+```powershell
+fd 关键词                      # 文件名模糊匹配
+fd -e py                       # 所有 .py
+fd -H -I "config"              # 包含隐藏文件和 gitignore 里的
+fd -x rm {}                    # 对结果逐个执行命令
+```
+
+### fzf —— 模糊查找
+
+```powershell
+fd | fzf                       # 从文件列表里模糊挑
+history | fzf                  # 翻历史命令
+```
+
+### bat —— 带语法高亮的 cat
+
+```powershell
+bat README.md                  # 高亮 + 行号 + git 改动标记
+bat -p file.py                 # 纯净输出，不要行号
+```
+
+### delta —— git diff 变好看
+
+配好 git 后自动生效：
+
+```
+git config --global core.pager delta
+git config --global interactive.diffFilter "delta --color-only"
+```
+
+### jq —— 处理 JSON
+
+```powershell
+curl.exe -s https://api.github.com/repos/PowerShell/PowerShell | jq .tag_name
+Get-Content data.json | jq ".[] | .name"
+```
+
+---
+
+## 验证与排错
+
+跑一遍体检：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
+```
+
+它会分 6 段检查并给出报告：PowerShell 7 / Rust 工具 / profile 编码设置 / 注册表与文件关联 / 应用层配置 / PATH。
+
+加 `-Json` 可以输出机器可读结果。
+
+更多踩坑记录见 [references/troubleshooting.md](references/troubleshooting.md)，涵盖：装完 `pwsh` 找不到、中文还是乱码、双击 `.ps1` 提示没有关联、镜像下载卡住、Windows Terminal 没跟着切等。
+
+---
+
+## 卸载
+
+```powershell
+# 1. 删安装目录
+Remove-Item -Recurse -Force "$env:LOCALAPPDATA\ps7-toolkit"
+
+# 2. 删这几个注册表项
+Remove-Item -Recurse "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe"
+Remove-Item -Recurse "HKCU:\Software\Microsoft\Classes\.ps1"
+Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name DelegationConsole
+```
+
+再从用户 PATH 里去掉 `%LOCALAPPDATA%\ps7-toolkit\ps7` 和 `%LOCALAPPDATA%\ps7-toolkit\bin`，最后删掉两个 profile 文件里本工具追加的段落。
+
+---
+
+## 这个工具会改动什么
+
+所有改动都在**当前用户**范围内，不需要管理员权限，**不写 `HKEY_LOCAL_MACHINE`**。
+
+| 改动 | 位置 |
+|---|---|
+| 写入可执行文件 | `%LOCALAPPDATA%\ps7-toolkit`（可用 `-ToolsRoot` 改） |
+| 追加用户 PATH | `HKCU\...\Environment` 的 `Path` |
+| 写入 profile | `Documents\PowerShell\...profile.ps1`（7.x）<br>`Documents\WindowsPowerShell\...profile.ps1`（5.1） |
+| 注册 pwsh 路径 | `HKCU\...\App Paths\pwsh.exe` |
+| 关联 `.ps1` 双击行为 | `HKCU\Software\Microsoft\Classes\.ps1\shell\open\command` |
+| 默认控制台 | `HKCU\...\Explorer\Advanced` 的 `DelegationConsole`（仅当检测到 Windows Terminal） |
+| 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs` |
+
+不想动系统默认就加 `-SkipDefaults`，或先跑 `-CheckOnly` 只看不改。
+
+**网络访问**：仅在需要下载时访问 `api.github.com`、`github.com`、`gh-proxy.com` / `ghfast.top` / `ghproxy.net`（国内加速镜像）、`aka.ms`。不收集任何数据，不上报统计，不需要任何 API Key。
+
+---
+
+## 设计上故意不做的事
+
+| 没做的事 | 原因 |
+|---|---|
+| 改 `HKLM\...\Nls\CodePage\ACP = 65001` | 会让老的 GBK 程序（部分国产软件、游戏）全部乱码，风险远大于收益 |
+| 把 `powershell.exe` 劫持成指向 pwsh | 系统组件和大量安装脚本硬依赖 `C:\Windows\System32\WindowsPowerShell\v1.0\`，改了会导致装软件失败 |
+| 用 `Add-Type` 编译 .NET 代码 | 部分 AI 客户端的安全策略会直接拦截 |
+
+正确姿势是习惯敲 `pwsh`，或用开始菜单里的「PowerShell 7」。5.1 留着不碍事，老脚本还能跑。
+
+---
+
+## 作为 AI 技能使用
+
+`SKILL.md` 是给 AI 助手（Claude Code / WorkBuddy / 豆包 / 千问 / DSH 等）读的执行说明书，写着什么时候该触发、怎么调用、装完之后必须遵守的规范，以及几条硬禁忌。
+
+WorkBuddy 用户可以直接把本仓库打包成 zip，从「添加技能 → 导入技能」拖进去；其他客户端把整个目录放进各自的 skills 目录即可。
+
+---
+
+## 目录结构
+
+```
+ps7-toolkit/
+├── SKILL.md                      给 AI 助手读的执行说明书
+├── README.md                     本文件
+├── CHANGELOG.md                  版本记录
+├── assets/icon.png               512x512 图标
+├── scripts/
+│   ├── install.ps1               主安装器（探测优先 + 自动下载兜底）
+│   ├── setup-defaults.ps1        默认化（profile / 注册表 / 关联 / 快捷方式 / 终端）
+│   └── verify.ps1                六段体检
+└── references/
+    └── troubleshooting.md        踩坑与排错
+```
+
+---
+
+## 环境要求
+
+- Windows 10 / 11（Server 亦可）
+- Windows PowerShell 5.1（系统自带）或 PowerShell 7+
+- 无需管理员权限（如勾选「为所有用户安装」MSI 版才需要）
+
+---
+
+## 许可证
+
+[MIT](LICENSE)

@@ -1,0 +1,14 @@
+# 下载缓存
+_dl/
+*.zip
+!assets/*.zip
+
+# 系统垃圾
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
