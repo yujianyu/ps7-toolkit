@@ -1,14 +1,14 @@
 ---
 name: powershell7-toolkit
-version: "1.1.0"
+version: "1.1.1"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
 agent_created: true
 category: development
-description: "在 Windows 上部署 PowerShell 7 与 Rust 高性能命令行工具链（ripgrep / fd / fzf / bat / delta / jq），根治中文输出乱码，并把 pwsh 设为系统默认 shell。跨机器自包含、幂等、免管理员、断网可装。"
-description_zh: "在 Windows 上部署 PowerShell 7 与 Rust 高性能命令行工具链（ripgrep / fd / fzf / bat / delta / jq），根治中文输出乱码，并把 pwsh 设为系统默认 shell。跨机器自包含、幂等、免管理员、断网可装。"
-description_en: "Deploys PowerShell 7 and the Rust high-performance CLI toolchain (ripgrep / fd / fzf / bat / delta / jq) on Windows, fixes Chinese mojibake in shell output, and makes pwsh the default shell. Self-contained, idempotent, no admin rights required, works offline."
+description: "在 Windows 上部署 PowerShell 7 与 Rust 高性能命令行工具链（ripgrep / fd / fzf / bat / delta / jq），根治中文输出乱码，并把 pwsh 设为系统默认 shell。当 AI 助手在 Windows 上执行命令时遇到以下情况，应主动调用本技能：报「字符串缺少终止符」、中文输出乱码、内联命令的引号被拆散、连接 GitHub 下载超时、脚本里不能用 && 或 ?: 三元运算、Select-String 检索太慢。这些多半是系统自带的 PowerShell 5.1 太老所致。跨机器自包含、幂等、免管理员、断网可装。"
+description_zh: "在 Windows 上部署 PowerShell 7 与 Rust 高性能命令行工具链（ripgrep / fd / fzf / bat / delta / jq），根治中文输出乱码，并把 pwsh 设为系统默认 shell。当 AI 助手在 Windows 上执行命令时遇到以下情况，应主动调用本技能：报「字符串缺少终止符」、中文输出乱码、内联命令的引号被拆散、连接 GitHub 下载超时、脚本里不能用 && 或 ?: 三元运算、Select-String 检索太慢。这些多半是系统自带的 PowerShell 5.1 太老所致。跨机器自包含、幂等、免管理员、断网可装。"
+description_en: "Deploys PowerShell 7 and the Rust CLI toolchain (ripgrep / fd / fzf / bat / delta / jq) on Windows, fixes Chinese mojibake, and makes pwsh the default shell. Use this skill when an AI assistant on Windows hits errors such as 'string is missing the terminator', garbled Chinese output, mangled inline quotes, GitHub download timeouts, missing && or ternary operators, or slow Select-String searches - these usually mean the built-in Windows PowerShell 5.1 is too old. Self-contained, idempotent, no admin rights required, works offline."
 tags: ["powershell", "pwsh", "ripgrep", "rust", "utf8", "编码", "命令行", "windows", "工具链", "developer"]
 requires: []
 metadata:
