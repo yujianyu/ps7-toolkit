@@ -12,7 +12,21 @@
 
 ## 这个工具是干什么的
 
-一句话：**把 Windows 自带的 PowerShell 5.1 换成 PowerShell 7，再补上 6 个 Rust 写的命令行工具，顺手把中文乱码根治掉。**
+**它主要是给 AI 助手用的，不只是给人用的。**
+
+现在你在 WorkBuddy、DeepSeek DSH、豆包、千问这些 AI 客户端里让它跑个命令、处理批文件、搜点东西，它在 Windows 上调的是系统自带的 **Windows PowerShell 5.1** —— 一个 2009 年的老引擎。于是就经常出现这些情况：
+
+- 脚本里带中文注释，直接报「字符串缺少终止符」
+- 输出满屏 `鐗堟湰` 这种乱码，AI 自己也读不懂在返回什么
+- 内联命令的引号被外层解析拆散，明明写对了却执行失败
+- 想连 GitHub 下载点东西，超时 —— 因为 5.1 默认用老 TLS
+- 想用 `&&` 串联命令、用 `?:` 写个判断，语法直接不支持
+
+这些看起来像「AI 出错了」，其实九成是 shell 太老。AI 在 5.1 上每走一步都要绕坑，绕不过去就报错，报了错就重试，token 就这样白白烧掉。
+
+换成 PowerShell 7 之后，这一整类问题会一次性消失：UTF-8 是默认的，TLS 是新的，语法是现代的，速度还快一倍。AI 不用再猜、不用再绕，把精力放回真正要做的事上。
+
+**所以它做的事，一句话：把 Windows 自带的 PowerShell 5.1 换成 PowerShell 7，再补上 6 个 Rust 写的命令行工具，顺手把中文乱码根治掉。**
 
 装完之后你会得到三样东西：
 
@@ -20,10 +34,11 @@
 - **六个 Rust 命令行工具** —— `ripgrep`（检索）/ `fd`（找文件）/ `fzf`（模糊跳转）/ `bat`（带高亮的 cat）/ `delta`（diff 美化）/ `jq`（处理 JSON）
 - **一整套已经配好的默认** —— profile 编码、`.ps1` 双击关联、Windows Terminal 与 VSCode 的默认终端、开始菜单快捷方式
 
-这些不是可有可无的锦上添花。如果你在 Windows 上用过命令行，下面这些坑大概率都踩过：
+这些不是可有可无的锦上添花。如果你在 Windows 上用过命令行——或者让 AI 帮你用过——下面这些坑大概率都踩过：
 
 | 症状 | 原因 | 装完之后 |
 |---|---|---|
+| AI 执行脚本时报「字符串缺少终止符」 | 脚本含中文，5.1 按 ANSI/GBK 读 | 7 默认 UTF-8，不再误判 |
 | 中文输出变成 `鐗堟湰` 一堆乱码 | 5.1 默认编码是 ANSI/GBK | UTF-8 全局打通，所有调用 PowerShell 的软件都不乱码 |
 | 连不上 GitHub / 下载总是失败 | 5.1 默认用老 TLS，握手被拒 | 7 内置 TLS 1.2+，直连正常 |
 | 脚本里不能用 `&&`、`??`、`?:` | 5.1 不支持这些语法 | 全部可用 |
@@ -249,9 +264,28 @@ Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Ad
 
 ## 作为 AI 技能使用
 
-`SKILL.md` 是给 AI 助手（Claude Code / WorkBuddy / 豆包 / 千问 / DSH 等）读的执行说明书，写着什么时候该触发、怎么调用、装完之后必须遵守的规范，以及几条硬禁忌。
+**最省事的方式：把下面这句话直接丢给你的 AI 助手。**
 
-WorkBuddy 用户可以直接把本仓库打包成 zip，从「添加技能 → 导入技能」拖进去；其他客户端把整个目录放进各自的 skills 目录即可。
+```text
+帮我把 https://github.com/yujianyu/ps7-toolkit 装成技能，然后按它的 SKILL.md 用起来
+```
+
+只要这个 AI 助手能联网、能读写文件（Claude Code / WorkBuddy / 豆包 / 千问 / DeepSeek DSH / Cursor 都算），它就能自己把仓库拉下来、放进对应的技能目录。
+
+仓库根目录的 `SKILL.md` 就是给它们读的执行说明书，里面写好了什么时候该触发、怎么调用、装完之后必须遵守的规范，以及几条硬禁忌（比如别去改 `HKLM` 的代码页、别劫持 `powershell.exe`）。
+
+各客户端的技能目录：
+
+| 客户端 | 放哪里 |
+|---|---|
+| WorkBuddy | 「添加技能 → 导入技能」，拖文件夹或 zip 进去 |
+| Claude Code | `~/.claude/skills/ps7-toolkit/` |
+| 千问 | `~/.qwenworkcn/skills/ps7-toolkit/` |
+| 豆包 | `%LOCALAPPDATA%\DoubaoWork\User Data\Default\.doubaowork\agent_mode\workspace\.user_skills\ps7-toolkit\` |
+| DeepSeek DSH | 在该客户端 skills 目录建同名文件夹，或把要点追加到 `~/.dsh/AGENTS.md` |
+| 其他 | 整个目录丢进该客户端的 skills 目录即可，认 `SKILL.md` |
+
+> 本技能也已提交到 ClawHub（WorkBuddy 技能市场的 SkillHub 分区），审核放行后可直接 `clawhub install yujianyu/powershell7-toolkit` 安装。目前仍处于平台审核队列中，所以上面那个「丢仓库地址给 AI」的方式最稳妥。
 
 ---
 
