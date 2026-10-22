@@ -1,6 +1,6 @@
 ---
 name: powershell7-toolkit
-version: "1.1.3"
+version: "1.1.4"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
@@ -57,11 +57,14 @@ powershell -ExecutionPolicy Bypass -File "<技能目录>\scripts\install.ps1"
 
 ## 三、日常使用规范（装完之后必须遵守）
 
-1. **执行命令优先用 pwsh**：
+1. **执行命令优先用 pwsh**。**不要写死路径**——用户可能用 `-ToolsRoot` 装到别的盘：
    ```powershell
-   & "$env:LOCALAPPDATA\ps7-toolkit\ps7\pwsh.exe" -NoProfile -File script.ps1
+   # 从 App Paths 拿真实位置（setup-defaults 会写，指向实际安装的 pwsh）
+   $pwsh = (Get-ItemProperty 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe').'(default)'
+   & $pwsh -NoProfile -File script.ps1
    ```
-   或直接敲 `pwsh`（已在 PATH）。
+   拿不到就直接敲 `pwsh`（装完在 PATH 里）。只有在必须写死时才用默认位置
+   `%LOCALAPPDATA%\ps7-toolkit\ps7\pwsh.exe`，而且要先 `Test-Path` 确认存在。
 2. **复杂脚本写成 `.ps1` 文件再用 `-File` 跑**，不要用 `-Command` 内联 —— 内联时嵌套引号会被外层解析拆散。
 3. **给 PowerShell 5.1 跑的 .ps1 文件必须存成 UTF-8 with BOM**；给 pwsh 跑的用普通 UTF-8 即可。
    - 原因：5.1 读 .ps1 按 ANSI(GBK) 解析，脚本里含中文注释会报"字符串缺少终止符"。
@@ -100,7 +103,7 @@ assets/icon.png                   512x512 图标
 scripts/install.ps1               主安装器（幂等，跨机器）
 scripts/setup-defaults.ps1        默认化（profile/注册表/文件关联/快捷方式/终端/VSCode）
 scripts/verify.ps1                体检脚本，输出诊断报告
-scripts/smoke-test.ps1            20 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
+scripts/smoke-test.ps1            23 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
 references/troubleshooting.md     踩坑与排错
 CHANGELOG.md                      版本记录
 ```
@@ -125,7 +128,7 @@ CHANGELOG.md                      版本记录
 | 写入 profile | `%USERPROFILE%\Documents\PowerShell\Microsoft.PowerShell_profile.ps1`（7.x）<br>`%USERPROFILE%\Documents\WindowsPowerShell\Microsoft.PowerShell_profile.ps1`（5.1） | 删除该文件或去掉本技能追加的段落 |
 | 注册 pwsh 路径 | `HKCU\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe` | 删除该键 |
 | 关联 .ps1 双击行为 | `HKCU\Software\Microsoft\Classes\.ps1\shell\open\command` | 删除该键 |
-| 默认控制台 | `HKCU\...\Explorer\Advanced` 的 `DelegationConsole`（仅当检测到 Windows Terminal 时） | 删除该值 |
+| 默认控制台 | `HKCU\Console\%%Startup` 的 `DelegationConsole` / `DelegationTerminal`（仅当检测到 Windows Terminal 时） | 删掉这两个值 |
 | 建开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs` | 删除对应快捷方式 |
 
 网络行为：仅在需要下载时访问 `api.github.com`（查版本与真实下载地址）、`github.com`（下载安装包）、`gh-proxy.com` / `ghfast.top` / `ghproxy.net`（国内加速镜像）、`aka.ms`（微软官方短链）。不收集任何用户数据、不上报统计、不请求 API Key。

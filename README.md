@@ -228,7 +228,7 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
 powershell -ExecutionPolicy Bypass -File ".\scripts\smoke-test.ps1"
 ```
 
-20 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
+23 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
 覆盖：只读体检、隔离安装、6 个工具是否真能跑、幂等（连跑两次二进制一致）、
 `-Force` 是否走复制而不是下载、中文 + 空格路径、错误参数处理、卸载是否干净。
 
@@ -241,13 +241,15 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\smoke-test.ps1"
 ## 卸载
 
 ```powershell
-# 1. 删安装目录
+# 1. 删安装目录（默认在 %LOCALAPPDATA%\ps7-toolkit；装的时候用了 -ToolsRoot 就删那个目录）
 Remove-Item -Recurse -Force "$env:LOCALAPPDATA\ps7-toolkit"
 
 # 2. 删这几个注册表项
 Remove-Item -Recurse "HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe"
 Remove-Item -Recurse "HKCU:\Software\Microsoft\Classes\.ps1"
-Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced" -Name DelegationConsole
+# 这两项是「默认终端程序」的全局设置，删掉等于恢复系统自动选择
+Remove-ItemProperty "HKCU:\Console\%%Startup" -Name DelegationConsole -ErrorAction SilentlyContinue
+Remove-ItemProperty "HKCU:\Console\%%Startup" -Name DelegationTerminal -ErrorAction SilentlyContinue
 ```
 
 再从用户 PATH 里去掉 `%LOCALAPPDATA%\ps7-toolkit\ps7` 和 `%LOCALAPPDATA%\ps7-toolkit\bin`，最后删掉两个 profile 文件里本工具追加的段落。
@@ -265,7 +267,7 @@ Remove-ItemProperty "HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Ad
 | 写入 profile | `Documents\PowerShell\...profile.ps1`（7.x）<br>`Documents\WindowsPowerShell\...profile.ps1`（5.1） |
 | 注册 pwsh 路径 | `HKCU\...\App Paths\pwsh.exe` |
 | 关联 `.ps1` 双击行为 | `HKCU\Software\Microsoft\Classes\.ps1\shell\open\command` |
-| 默认控制台 | `HKCU\...\Explorer\Advanced` 的 `DelegationConsole`（仅当检测到 Windows Terminal） |
+| 默认控制台 | `HKCU\Console\%%Startup` 的 `DelegationConsole` / `DelegationTerminal`（仅当检测到 Windows Terminal） |
 | 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs` |
 
 不想动系统默认就加 `-SkipDefaults`，或先跑 `-CheckOnly` 只看不改。
@@ -325,7 +327,7 @@ ps7-toolkit/
 │   ├── install.ps1               主安装器（探测优先 + 自动下载兜底）
 │   ├── setup-defaults.ps1        默认化（profile / 注册表 / 关联 / 快捷方式 / 终端）
 │   ├── verify.ps1                六段体检
-│   └── smoke-test.ps1            20 项回归测试（隔离沙箱，不碰系统配置）
+│   └── smoke-test.ps1            23 项回归测试（隔离沙箱，不碰系统配置）
 └── references/
     └── troubleshooting.md        踩坑与排错
 ```
@@ -342,10 +344,13 @@ ps7-toolkit/
 
 ## 更新记录
 
-- **v1.1.3**（最新）—— 第一轮回归测试修掉 6 个真 bug：安装器退出码「假成功」、GitHub 限流时
+- **v1.1.4**（最新）—— 换环境实测（用另一个 AI 客户端独立装一遍、跑一遍回归测试）发现的 5 个问题：
+  空的下载缓存目录永远清不掉、「默认终端程序」写到了系统不读的注册表位置等于空跑、
+  体检只做字符串包含所以会谎报 PATH 正常、换目录重装会留下死的 PATH 项、以及一条恒假的测试断言。
+  细节见 [CHANGELOG.md](CHANGELOG.md)。
+- **v1.1.3** —— 第一轮回归测试修掉 6 个真 bug：安装器退出码「假成功」、GitHub 限流时
   6 个工具静默装不上、PowerShell 5.1 下进度条刷屏、体检脚本硬编码了开发机路径、
   `-ZipPath` 输了不存在的文件会偷偷改成联网下载、复用 choco shim 导致「装上但跑不起来」。
-  细节见 [CHANGELOG.md](CHANGELOG.md)。
 - **v1.1.2** —— 技能市场重发布，代码与 1.1.1 完全一致，无需重装。
 - **v1.1.1** —— 技能描述改为「症状驱动」，让 AI 在撞到具体报错时更容易想起调用它。
 - **v1.1.0** —— 首个公开版本。

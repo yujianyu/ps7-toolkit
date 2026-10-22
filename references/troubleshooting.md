@@ -38,12 +38,13 @@ A: 脚本把 `.ps1` 关联设为 `"pwsh.exe" -NoLogo -NoProfile -File "%1"`。
 
 ## Q: 改了默认终端后某个老程序全屏显示异常？
 A: 撤销默认终端（回到 conhost）：
-删除 `HKCU\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced` 的 `DelegationConsole` 值。
+删除 `HKCU\Console\%%Startup` 的 `DelegationConsole` 与 `DelegationTerminal` 两个值
+（或把两者都改成 `{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}` 指定用旧控制台宿主）。
 
 ## Q: 怎么彻底卸载？
 A:
 1. `& "$env:LOCALAPPDATA\ps7-toolkit\scripts\verify.ps1"` 先看现状
-2. 删除整个 `%LOCALAPPDATA%\ps7-toolkit` 目录
-3. 撤销注册表三项：App Paths\pwsh.exe、Classes\.ps1、Explorer\Advanced\DelegationConsole
+2. 删除整个 `%LOCALAPPDATA%\ps7-toolkit` 目录（安装时用了 `-ToolsRoot` 的，删那个目录）
+3. 撤销注册表三项：App Paths\pwsh.exe、Classes\.ps1、Console\%%Startup 的 DelegationConsole / DelegationTerminal
 4. 删除两个 profile 文件里的 `# ===== ps7-toolkit ...` 段落
 5. 删除开始菜单 `PowerShell 7.lnk`

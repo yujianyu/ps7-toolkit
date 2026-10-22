@@ -83,11 +83,45 @@ $extra
 # ---------------------------------------------------------------- 2. 用户 PATH
 Say "`n[2/6] 配置用户 PATH"
 $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+if (-not $userPath) { $userPath = '' }
+
+# 逐项处理，不用 -like "*$d*" 那种子串包含：
+#   1) 子串匹配会让 G:\Tools\bin2 因为「含 G:\Tools\bin」而被跳过（其实没配）；
+#   2) 老逻辑只做「缺了就追加」，换安装目录重装后旧 root 的项永远留着，最后变成死链。
+$entries = @()
+foreach ($e in $userPath.Split(';')) {
+    $t = $e.Trim()
+    if ($t) { $entries += $t }
+}
+
+$kept = @(); $pruned = @()
+foreach ($e in $entries) {
+    $exp = [Environment]::ExpandEnvironmentVariables($e).TrimEnd('\')
+    # 只清理「看起来是本工具装的、且目录确实已经不在了」的项；别人的路径一律不动
+    $ours = ($exp -match 'ps7-toolkit') -or ($exp -eq $PS7Dir.TrimEnd('\')) -or ($exp -eq $BinDir.TrimEnd('\'))
+    # 再退一步：连所在的盘都不可用（移动硬盘没插、网络盘断线）就不动，免得拔一次盘配置就被删了
+    $rootUsable = $true
+    try {
+        $root = [System.IO.Path]::GetPathRoot($exp)
+        if ($root) { $rootUsable = Test-Path $root }
+    } catch { }
+    if ($ours -and $rootUsable -and -not (Test-Path $exp)) { $pruned += $e } else { $kept += $e }
+}
+
 $add = @()
-foreach ($d in @($PS7Dir, $BinDir)) { if ($userPath -notlike "*$d*") { $add += $d } }
-if ($add.Count -gt 0) {
-    [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + ($add -join ';')), 'User')
-    Say "    已加入: $($add -join ', ')"
+foreach ($d in @($PS7Dir, $BinDir)) {
+    $dn = $d.TrimEnd('\')
+    $has = $false
+    foreach ($e in $kept) {
+        if ([string]::Equals($e.TrimEnd('\'), $dn, [StringComparison]::OrdinalIgnoreCase)) { $has = $true; break }
+    }
+    if (-not $has) { $add += $d }
+}
+
+if ($add.Count -gt 0 -or $pruned.Count -gt 0) {
+    [Environment]::SetEnvironmentVariable('Path', ((@($kept) + @($add)) -join ';'), 'User')
+    if ($pruned.Count -gt 0) { Say "    已移除失效的旧路径: $($pruned -join ', ')" }
+    if ($add.Count -gt 0) { Say "    已加入: $($add -join ', ')" }
 } else { Say "    PATH 已包含，无需修改" }
 
 # ---------------------------------------------------------------- 3. App Paths
@@ -137,9 +171,13 @@ if (Test-Path $wt) {
         $cfg.defaultProfile = $guid
         $cfg | ConvertTo-Json -Depth 20 | Set-Content $wt -Encoding UTF8
         Say "    Windows Terminal 默认配置 -> PowerShell 7"
-        $ak = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'
-        if (-not (Test-Path $ak)) { New-Item -Path $ak -Force | Out-Null }
-        Set-ItemProperty -Path $ak -Name 'DelegationConsole' -Value 'WindowsTerminal_8wekyb3d8bbwe!Microsoft.WindowsTerminal_8wekyb3d8bbwe'
+        # 「默认终端程序」真正的开关在 HKCU\Console\%%Startup 的两个 GUID 值（微软官方文档口径）。
+        # 以前写的是 Explorer\Advanced\DelegationConsole —— 那个位置系统根本不读，等于什么都没做，
+        # 体检那边也只查了「键是否存在」，所以一直是假 OK。
+        $startup = 'HKCU:\Console\%%Startup'
+        if (-not (Test-Path $startup)) { New-Item -Path $startup -Force | Out-Null }
+        Set-ItemProperty -Path $startup -Name 'DelegationConsole'  -Value '{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}'
+        Set-ItemProperty -Path $startup -Name 'DelegationTerminal' -Value '{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}'
         Say "    默认终端程序 -> Windows Terminal"
     } catch { Say "    Windows Terminal 配置失败: $($_.Exception.Message)" }
 } else { Say "    未检测到 Windows Terminal，跳过" }

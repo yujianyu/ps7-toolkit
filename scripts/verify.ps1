@@ -100,10 +100,25 @@ if ($SkipDefaults) {
 } else {
     foreach ($c in @(
         @{ n = 'App Paths\pwsh.exe'; p = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe' },
-        @{ n = '.ps1 关联';         p = 'HKCU:\Software\Microsoft\Classes\.ps1\shell\open\command' },
-        @{ n = '默认终端(Terminal)'; p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' })) {
+        @{ n = '.ps1 关联';         p = 'HKCU:\Software\Microsoft\Classes\.ps1\shell\open\command' })) {
         if (Test-Path $c.p) { Write-Host ("    [OK] " + $c.n) -ForegroundColor Green }
         else { Write-Host ("    [X] " + $c.n) -ForegroundColor Red }
+    }
+    # 默认终端程序：真正生效的位置是 HKCU\Console\%%Startup 的两个 GUID 值，
+    # 不是 Explorer\Advanced（那个键是系统自带的，永远存在，查它等于没查）。
+    $startup = 'HKCU:\Console\%%Startup'
+    $wtConsole = '{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}'
+    $consoleHost = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
+    $dc = $null
+    if (Test-Path $startup) { $dc = (Get-ItemProperty -Path $startup -Name 'DelegationConsole' -ErrorAction SilentlyContinue).DelegationConsole }
+    if (-not $dc) {
+        Write-Host "    [!] 默认终端程序未显式设置（可能仍是旧的控制台宿主；Win11 22H2+ 一般会自动用 Windows Terminal）" -ForegroundColor Yellow
+    } elseif ($dc -eq $wtConsole) {
+        Write-Host "    [OK] 默认终端程序 = Windows Terminal" -ForegroundColor Green
+    } elseif ($dc -eq $consoleHost) {
+        Write-Host "    [!] 默认终端程序 = 旧的控制台宿主（想换回 Windows Terminal 请重跑 setup-defaults.ps1）" -ForegroundColor Yellow
+    } else {
+        Write-Host "    [OK] 默认终端程序已指定: $dc" -ForegroundColor Green
     }
 }
 
@@ -129,16 +144,40 @@ if ($SkipDefaults) {
     Write-Host "    [-] 已跳过（-SkipDefaults 不改 PATH）" -ForegroundColor DarkGray
 } else {
     $up = [Environment]::GetEnvironmentVariable('Path','User')
-    $ps7dir = if ($PwshPath) { Split-Path -Parent $PwshPath } else { $null }
-    if (-not $up) { $up = '' }
+    # 逐项比较：以前用 IndexOf / -like 做子串包含，会把「路径里恰好含这几个字」误判成已配置，
+    # 也从不检查目录是否还存在，于是 PATH 里留着死链也照样打 OK。
+    $entries = @()
+    if ($up) {
+        foreach ($e in $up.Split(';')) {
+            $t = $e.Trim()
+            if ($t) { $entries += $t.TrimEnd('\') }
+        }
+    }
+    $ps7dir = if ($PwshPath) { (Split-Path -Parent $PwshPath).TrimEnd('\') } else { $null }
     foreach ($d in @($ps7dir, $BinDir)) {
         if (-not $d) { continue }
-        if ($up.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
-            Write-Host "    [OK] $d" -ForegroundColor Green
-        } else {
+        $d = $d.TrimEnd('\')
+        $hit = $false
+        foreach ($e in $entries) { if ([string]::Equals($e, $d, [StringComparison]::OrdinalIgnoreCase)) { $hit = $true; break } }
+        if (-not $hit) {
             # 目录能用但没进 PATH：不算失败，只是新开的终端里敲不到短命令
             Write-Host "    [!] $d 不在用户 PATH（工具本身可用，需用绝对路径或手动加 PATH）" -ForegroundColor Yellow
+        } elseif (-not (Test-Path $d)) {
+            Write-Host "    [X] $d 在 PATH 里但目录不存在（死链）" -ForegroundColor Red
+        } else {
+            Write-Host "    [OK] $d" -ForegroundColor Green
         }
+    }
+    # 顺带把 PATH 里过期/失效的项点出来（只提示，不自动改）
+    $dead = @()
+    foreach ($e in $entries) {
+        $exp = [Environment]::ExpandEnvironmentVariables($e)
+        if (-not (Test-Path $exp)) { $dead += $e }
+    }
+    if ($dead.Count -gt 0) {
+        Write-Host ("    [!] 用户 PATH 里有 {0} 项指向不存在的目录：" -f $dead.Count) -ForegroundColor Yellow
+        foreach ($e in $dead) { Write-Host "        - $e" -ForegroundColor DarkYellow }
+        Write-Host "        （不影响使用，重跑 setup-defaults.ps1 会自动清掉属于本工具的旧路径）" -ForegroundColor DarkGray
     }
 }
 

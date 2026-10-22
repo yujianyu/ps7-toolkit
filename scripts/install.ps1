@@ -349,11 +349,22 @@ if (-not $SkipDefaults) {
 }
 
 # ---- 4. 清理下载缓存（装完就没用了，别留 100MB 垃圾） ----
+# 注意：这个目录在开头就无条件建了出来，即使全程复用系统已装的工具、一个字节都没下，
+# 也会留下一个空目录。所以判断条件必须是「目录存在就删」，不能是「有文件才删」
+# —— 没有文件时 Measure-Object 的 Sum 是 $null，$null -gt 0 恒为假，空目录永远清不掉。
 if (Test-Path $CacheDir) {
-    $sum = (Get-ChildItem $CacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
-    if ($sum -gt 0) {
-        Remove-Item $CacheDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Step ("清理下载缓存，释放约 {0} MB" -f [math]::Round($sum/1MB, 1))
+    $freed = 0
+    try {
+        $m = Get-ChildItem $CacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum
+        if ($m -and $m.Sum) { $freed = [double]$m.Sum }
+    } catch { }
+    Remove-Item $CacheDir -Recurse -Force -ErrorAction SilentlyContinue
+    if (Test-Path $CacheDir) {
+        Write-Warn "下载缓存没能删干净（可能被占用），可手动删除: $CacheDir"
+    } elseif ($freed -gt 0) {
+        Write-Step ("清理下载缓存，释放约 {0} MB" -f [math]::Round($freed / 1MB, 1))
+    } else {
+        Write-Step '清理下载缓存（没有实际下载，仅删掉空目录）'
     }
 }
 

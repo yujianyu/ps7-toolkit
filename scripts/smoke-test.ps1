@@ -84,11 +84,12 @@ Write-Host "`n=== 3. 幂等（连跑两次） ===" -ForegroundColor Cyan
 $snapA = (Get-ChildItem $bin1 -File | ForEach-Object { $_.Name + ':' + $_.Length }) -join '|'
 $t1 = Get-Date
 & $src -ToolsRoot $box1 -SkipDefaults *> (Join-Path $log 't3.log')
-$el2 = [int]((Get-Date) - $t1).TotalSeconds
+$ms2 = [int]((Get-Date) - $t1).TotalMilliseconds
 $snapB = (Get-ChildItem $bin1 -File | ForEach-Object { $_.Name + ':' + $_.Length }) -join '|'
-T 'T12 第二次运行退出码 0' { @{ ok = ($LASTEXITCODE -eq 0); detail = "exit=$LASTEXITCODE, ${el2}s" } }
+$txt3 = Get-Content (Join-Path $log 't3.log') -Raw -Encoding UTF8
+T 'T12 第二次运行退出码 0' { @{ ok = ($LASTEXITCODE -eq 0); detail = "exit=$LASTEXITCODE, ${ms2}ms" } }
 T 'T13 第二次运行二进制完全一致（未重复下载）' { @{ ok = ($snapA -eq $snapB); detail = if ($snapA -eq $snapB) { '一致' } else { '内容有变化' } } }
-T 'T14 第二次运行明显更快' { @{ ok = ($el2 -lt $el1); detail = "第一次=${el1}s 第二次=${el2}s" } }
+T 'T14 第二次运行没有重新下载' { $dl2 = ($txt3 -match '开始下载|自动下载 PowerShell 7'); @{ ok = (-not $dl2); detail = "日志里出现下载步骤 = $dl2" } }
 
 # ---------------------------------------------------------------- 4
 Write-Host "`n=== 4. -Force 复制本机安装（不联网） ===" -ForegroundColor Cyan
@@ -123,6 +124,30 @@ if (-not $KeepArtifacts) {
 } else {
     T 'T20 删目录即卸载，且未污染默认目录' { @{ ok = $true; detail = '已跳过清理（-KeepArtifacts）' } }
 }
+
+# ---------------------------------------------------------------- 8
+Write-Host "`n=== 8. 空的下载缓存目录 ===" -ForegroundColor Cyan
+# 全程复用系统已装工具时一个字节都不会下载，_dl 会被建成空目录。
+# 老逻辑用 sum -gt 0 判断，空目录的 Sum 是 $null，永远清不掉。
+$box6 = Join-Path $base 'box6'
+$dl6  = Join-Path $box6 '_dl'
+New-Item -ItemType Directory -Force -Path $dl6 | Out-Null
+& $src -ToolsRoot $box6 -SkipDefaults -SkipRustTools *> (Join-Path $log 't8.log')
+T 'T21 空缓存目录也会被清理' { @{ ok = (-not (Test-Path $dl6)); detail = "_dl 仍存在 = " + (Test-Path $dl6) } }
+Remove-Item $box6 -Recurse -Force -ErrorAction SilentlyContinue
+
+# ---------------------------------------------------------------- 9
+Write-Host "`n=== 9. 静态检查（防止老写法回来） ===" -ForegroundColor Cyan
+$setupText  = Get-Content (Join-Path $PSScriptRoot 'setup-defaults.ps1') -Raw -Encoding UTF8
+$verifyText = Get-Content (Join-Path $PSScriptRoot 'verify.ps1') -Raw -Encoding UTF8
+
+# HKCU\Console\%%Startup 才是「默认终端程序」真正的开关；Explorer\Advanced 系统不读
+$oldTerm = $setupText.Contains('WindowsTerminal_8wekyb3d8bbwe!Microsoft.WindowsTerminal_8wekyb3d8bbwe')
+T 'T22 默认终端写到 Console\%%Startup' { @{ ok = ($setupText.Contains('HKCU:\Console\%%Startup') -and -not $oldTerm); detail = "写对位置 = $($setupText.Contains('HKCU:\Console\%%Startup'))，仍用老写法 = $oldTerm" } }
+
+# PATH 判断必须是逐项精确比较 + 目录存在性检查，不能再靠子串包含
+$oldPath = $verifyText.Contains('IndexOf($d')
+T 'T23 体检的 PATH 检查逐项精确比较并验证目录存在' { @{ ok = (-not $oldPath -and $verifyText.Contains('Test-Path $d')); detail = "仍用子串匹配 = $oldPath" } }
 
 # ---------------------------------------------------------------- 汇总
 Write-Host "`n########## 结果 ##########" -ForegroundColor Magenta
