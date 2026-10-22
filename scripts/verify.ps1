@@ -109,10 +109,12 @@ if ($SkipDefaults) {
     $startup = 'HKCU:\Console\%%Startup'
     $wtConsole = '{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}'
     $consoleHost = '{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}'
+    $autoPick = '{00000000-0000-0000-0000-000000000000}'
     $dc = $null
     if (Test-Path $startup) { $dc = (Get-ItemProperty -Path $startup -Name 'DelegationConsole' -ErrorAction SilentlyContinue).DelegationConsole }
-    if (-not $dc) {
-        Write-Host "    [!] 默认终端程序未显式设置（可能仍是旧的控制台宿主；Win11 22H2+ 一般会自动用 Windows Terminal）" -ForegroundColor Yellow
+    if (-not $dc -or $dc -eq $autoPick) {
+        # 全 0 GUID 不是「没设」，是「交给 Windows 自动选」——别当成已配置
+        Write-Host "    [!] 默认终端程序 = 自动选择（未显式指定；Win11 22H2+ 通常会自动用 Windows Terminal）" -ForegroundColor Yellow
     } elseif ($dc -eq $wtConsole) {
         Write-Host "    [OK] 默认终端程序 = Windows Terminal" -ForegroundColor Green
     } elseif ($dc -eq $consoleHost) {
