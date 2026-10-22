@@ -1,6 +1,6 @@
 ---
 name: powershell7-toolkit
-version: "1.1.4"
+version: "1.1.5"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
@@ -95,6 +95,9 @@ powershell -ExecutionPolicy Bypass -File "<技能目录>\scripts\install.ps1"
 | delta | git diff 高亮 | — |
 | jq | JSON 处理 | ConvertFrom-Json |
 
+> jq 中文键名注意：裸字段名只支持 ASCII。中文键必须写 `jq '.["名称"]'`，
+> 直接写 `.名称` 会报 `INVALID_CHARACTER`（中文键名/含空格键名都要走 `["..."]` 写法）。
+
 ## 六、文件清单
 
 ```
@@ -103,10 +106,14 @@ assets/icon.png                   512x512 图标
 scripts/install.ps1               主安装器（幂等，跨机器）
 scripts/setup-defaults.ps1        默认化（profile/注册表/文件关联/快捷方式/终端/VSCode）
 scripts/verify.ps1                体检脚本，输出诊断报告
-scripts/smoke-test.ps1            23 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
+scripts/wt-config.ps1             WT/VSCode 配置的文本级改写（保留注释，可被测试单独调用）
+scripts/smoke-test.ps1            40 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
 references/troubleshooting.md     踩坑与排错
 CHANGELOG.md                      版本记录
 ```
+
+遇到报错或结果不符合预期时，先读 @references/troubleshooting.md，里面有逐条现象与处置办法
+（`pwsh` 找不到、中文仍乱码、双击 `.ps1` 没反应、镜像下载卡住、Windows Terminal 没跟着切等）。
 
 ## 七、给终端用户的三步说明
 

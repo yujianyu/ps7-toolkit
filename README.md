@@ -206,6 +206,9 @@ curl.exe -s https://api.github.com/repos/PowerShell/PowerShell | jq .tag_name
 Get-Content data.json | jq ".[] | .name"
 ```
 
+> **中文键名注意**：jq 的裸字段名只支持 ASCII。中文键必须写 `jq '.["名称"]'`，
+> 直接写 `.名称` 会报 `INVALID_CHARACTER`。中文**值**不受影响，只有键名要注意。
+
 ---
 
 ## 验证与排错
@@ -228,7 +231,7 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
 powershell -ExecutionPolicy Bypass -File ".\scripts\smoke-test.ps1"
 ```
 
-23 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
+38 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
 覆盖：只读体检、隔离安装、6 个工具是否真能跑、幂等（连跑两次二进制一致）、
 `-Force` 是否走复制而不是下载、中文 + 空格路径、错误参数处理、卸载是否干净。
 
@@ -269,6 +272,7 @@ Remove-ItemProperty "HKCU:\Console\%%Startup" -Name DelegationTerminal -ErrorAct
 | 关联 `.ps1` 双击行为 | `HKCU\Software\Microsoft\Classes\.ps1\shell\open\command` |
 | 默认控制台 | `HKCU\Console\%%Startup` 的 `DelegationConsole` / `DelegationTerminal`（仅当检测到 Windows Terminal） |
 | 开始菜单快捷方式 | `%APPDATA%\Microsoft\Windows\Start Menu\Programs` |
+| 配置备份 | `settings.json.ps7bak`（WT / VSCode 各一份；生成后不再覆盖，保留最初原样） |
 
 不想动系统默认就加 `-SkipDefaults`，或先跑 `-CheckOnly` 只看不改。
 
@@ -327,7 +331,8 @@ ps7-toolkit/
 │   ├── install.ps1               主安装器（探测优先 + 自动下载兜底）
 │   ├── setup-defaults.ps1        默认化（profile / 注册表 / 关联 / 快捷方式 / 终端）
 │   ├── verify.ps1                六段体检
-│   └── smoke-test.ps1            23 项回归测试（隔离沙箱，不碰系统配置）
+│   ├── wt-config.ps1             WT/VSCode 配置的文本级改写（保留注释）
+│   └── smoke-test.ps1            38 项回归测试（隔离沙箱，不碰系统配置）
 └── references/
     └── troubleshooting.md        踩坑与排错
 ```
@@ -344,7 +349,14 @@ ps7-toolkit/
 
 ## 更新记录
 
-- **v1.1.4**（最新）—— 换环境实测（用另一个 AI 客户端独立装一遍、跑一遍回归测试）发现的 5 个问题：
+- **v1.1.5**（最新）—— 换环境复查又收到 3 条反馈，全部成立：体检把「全 0 GUID」当成已指定；
+  默认终端的注册表写入被 Windows Terminal 配置（JSONC，带 `//` 注释）解析失败连带跳过；
+  改写 WT/VSCode 配置会把用户的注释、空行、自定义 profile 全抹掉（只在「第一次跑」触发，
+  之后自愈，所以自己测不出来）。这一版把配置改写改成文本级定点修改 + 自动备份 + 改后自检，
+  内测又修掉 3 处：独立运行 `setup-defaults.ps1` 会往 PATH 加一条死链、
+  VSCode 配置「值已经对了」也会重写一次、落盘会丢掉原文件的 UTF-8 BOM。
+  回归测试从 23 项扩到 38 项。细节见 [CHANGELOG.md](CHANGELOG.md)。
+- **v1.1.4** —— 换环境实测（用另一个 AI 客户端独立装一遍、跑一遍回归测试）发现的 5 个问题：
   空的下载缓存目录永远清不掉、「默认终端程序」写到了系统不读的注册表位置等于空跑、
   体检只做字符串包含所以会谎报 PATH 正常、换目录重装会留下死的 PATH 项、以及一条恒假的测试断言。
   细节见 [CHANGELOG.md](CHANGELOG.md)。

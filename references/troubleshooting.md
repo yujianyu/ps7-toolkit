@@ -41,6 +41,25 @@ A: 撤销默认终端（回到 conhost）：
 删除 `HKCU\Console\%%Startup` 的 `DelegationConsole` 与 `DelegationTerminal` 两个值
 （或把两者都改成 `{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}` 指定用旧控制台宿主）。
 
+## Q: 默认终端改好了，但我的 `settings.json` 里注释没了？
+A: 这是 1.1.4 及更早版本造成的。旧写法会先 `ConvertFrom-Json` 再 `ConvertTo-Json` 整文件重写，
+注释、空行、字段顺序在那一步就丢了，本工具没有留原始副本，**没法自动还原**。
+1.1.5 起改成文本级定点修改，只动 `defaultProfile` 那一行和 `profiles.list` 里的一条，其余字节原样保留；
+并且即使本次无需修改也会留一份 `settings.json.ps7bak`（已存在则不覆盖，永远是「还没被改过」的那份）。
+
+注释要找回，可以从这两个地方取：Windows Terminal 侧的默认配置模板
+（`%LOCALAPPDATA%\Microsoft\Windows Terminal\defaults.json` 或设置界面的「打开 JSON 文件」），
+以及任何你之前手工备份过的副本。已经丢掉的注释只能手工补，工具不会凭空生成。
+
+## Q: `.ps7bak` 可以删吗？
+A: 可以。它只是还原用的副本。想回到改之前的状态：把 `settings.json.ps7bak` 改名覆盖回
+`settings.json`（先关掉 Windows Terminal）。删掉后下次运行会重新生成一份当时的快照。
+
+## Q: jq 报 `INVALID_CHARACTER` / 处理不了中文键名？
+A: jq 的裸字段名（`.名称`）只支持 ASCII，中文键名必须走括号写法：
+`jq -r '.["名称"]'`（英文双引号包住键名）。中文**值**不受影响，`jq -r .name` 读到中文值是正常的。
+AI 助手生成过滤器时最容易写成 `.名称`，报这个错先检查是不是中文键名没用 `["..."]`。
+
 ## Q: 怎么彻底卸载？
 A:
 1. `& "$env:LOCALAPPDATA\ps7-toolkit\scripts\verify.ps1"` 先看现状

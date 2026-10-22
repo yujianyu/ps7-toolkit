@@ -39,8 +39,18 @@ if (-not $PwshPath) {
 }
 if (-not $PwshPath) { Write-Host "    [X] 找不到 pwsh.exe，跳过默认化" -ForegroundColor Red; exit 1 }
 
-if (-not $BinDir) { $BinDir = Join-Path $ToolsRoot 'bin' }
+# 没显式传 -ToolsRoot 时，优先从探测到的 pwsh 反推根目录：<root>\ps7\pwsh.exe -> <root>
+# 否则会出现错位：PS7Dir 是从 $PwshPath 反推的（G:\Tools\ps7，对），
+# BinDir 却从写死的 $ToolsRoot 拼（%LOCALAPPDATA%\ps7-toolkit\bin，根本不存在），
+# 于是独立运行本脚本时往 PATH 里加一条死链。install.ps1 会显式传 -BinDir，只有独立运行会中招。
+if (-not $PSBoundParameters.ContainsKey('ToolsRoot')) {
+    $pwshDir = Split-Path -Parent $PwshPath
+    $maybeRoot = Split-Path -Parent $pwshDir
+    if ($maybeRoot -and (Test-Path (Join-Path $maybeRoot 'ps7\pwsh.exe'))) { $ToolsRoot = $maybeRoot }
+}
+
 $PS7Dir = Split-Path -Parent $PwshPath
+if (-not $BinDir) { $BinDir = Join-Path $ToolsRoot 'bin' }
 
 function Say ($m) { Write-Host $m }
 
@@ -110,6 +120,8 @@ foreach ($e in $entries) {
 
 $add = @()
 foreach ($d in @($PS7Dir, $BinDir)) {
+    # 只加真实存在的目录：否则上一段刚清掉的死链，这一段又原样加回来（左手删右手加）
+    if (-not (Test-Path $d)) { Say "    [!] 目录不存在，跳过: $d"; continue }
     $dn = $d.TrimEnd('\')
     $has = $false
     foreach ($e in $kept) {
@@ -123,6 +135,20 @@ if ($add.Count -gt 0 -or $pruned.Count -gt 0) {
     if ($pruned.Count -gt 0) { Say "    已移除失效的旧路径: $($pruned -join ', ')" }
     if ($add.Count -gt 0) { Say "    已加入: $($add -join ', ')" }
 } else { Say "    PATH 已包含，无需修改" }
+
+# 旧工具目录并存提示（升级场景常见：旧安装的 bin 与新 bin 同时在 PATH，内容相同、不冲突）。
+# 按设计绝不删用户自己的目录，只打印一行让用户知道可以手动清理。
+$oldTools = @()
+foreach ($e in $kept) {
+    $exp = [Environment]::ExpandEnvironmentVariables($e).TrimEnd('\')
+    if ([string]::Equals($exp, $PS7Dir.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if ([string]::Equals($exp, $BinDir.TrimEnd('\'),  [StringComparison]::OrdinalIgnoreCase)) { continue }
+    if ((Test-Path (Join-Path $exp 'rg.exe')) -or (Test-Path (Join-Path $exp 'fd.exe'))) { $oldTools += $exp }
+}
+if ($oldTools.Count -gt 0) {
+    Say "    [!] 检测到旧工具目录仍在 PATH（与本包新目录并存）: $($oldTools -join ', ')"
+    Say "        功能不冲突。如确认不再需要，可手动从用户 PATH 中移除。"
+}
 
 # ---------------------------------------------------------------- 3. App Paths
 Say "`n[3/6] 注册 App Paths\pwsh.exe"
@@ -158,38 +184,57 @@ try {
 
 # ---------------------------------------------------------------- 6. Windows Terminal / VSCode
 Say "`n[6/6] 配置 Windows Terminal 与 VSCode"
-$wt = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
-if (Test-Path $wt) {
+
+# 配置文件的改写逻辑放在 wt-config.ps1 里（可被回归测试单独测），这里只负责调用。
+$helper = Join-Path $PSScriptRoot 'wt-config.ps1'
+if (Test-Path $helper) { . $helper }
+else { Say "    [!] 缺少 wt-config.ps1（应与本脚本同目录），跳过 WT/VSCode 配置" }
+
+$wtPkg = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe'
+
+# ---- 6a. 默认终端程序 ----
+# 真正的开关是 HKCU\Console\%%Startup 的两个 GUID 值（微软官方文档口径）。
+# 以前写的是 Explorer\Advanced 下的 DelegationConsole —— 那个位置系统根本不读，等于什么都没做，
+# 体检那边也只查「键是否存在」，所以一直是假 OK。
+# 这一段必须独立于下面的 settings.json 解析：那一步可能因为 JSONC 语法失败，
+# 但不能连带把默认终端一起跳过（用户只会看到一句「WT 配置失败」，根本不知道少设了一项）。
+if (Test-Path $wtPkg) {
     try {
-        $cfg = Get-Content $wt -Raw -Encoding UTF8 | ConvertFrom-Json
-        $guid = '{9e1b2a44-7c3d-4f8e-b5a1-2d6c9f0e3b71}'
-        $plist = $cfg.profiles.list
-        if (-not ($plist | Where-Object { $_.name -eq 'PowerShell 7' })) {
-            $new = [PSCustomObject]@{ commandline = $PwshPath; guid = $guid; hidden = $false; name = 'PowerShell 7'; icon = 'ms-appx:///ProfileIcons/pwsh.png' }
-            $cfg.profiles.list = @($plist) + $new
-        }
-        $cfg.defaultProfile = $guid
-        $cfg | ConvertTo-Json -Depth 20 | Set-Content $wt -Encoding UTF8
-        Say "    Windows Terminal 默认配置 -> PowerShell 7"
-        # 「默认终端程序」真正的开关在 HKCU\Console\%%Startup 的两个 GUID 值（微软官方文档口径）。
-        # 以前写的是 Explorer\Advanced\DelegationConsole —— 那个位置系统根本不读，等于什么都没做，
-        # 体检那边也只查了「键是否存在」，所以一直是假 OK。
         $startup = 'HKCU:\Console\%%Startup'
         if (-not (Test-Path $startup)) { New-Item -Path $startup -Force | Out-Null }
         Set-ItemProperty -Path $startup -Name 'DelegationConsole'  -Value '{2EACA947-7F5F-4CFA-BA87-8F7FBEEFBE69}'
         Set-ItemProperty -Path $startup -Name 'DelegationTerminal' -Value '{E12CFF52-A866-4C77-9A90-F570A7AA2C6B}'
         Say "    默认终端程序 -> Windows Terminal"
-    } catch { Say "    Windows Terminal 配置失败: $($_.Exception.Message)" }
-} else { Say "    未检测到 Windows Terminal，跳过" }
+    } catch { Say "    默认终端程序设置失败: $($_.Exception.Message)" }
+} else { Say "    未检测到 Windows Terminal，跳过默认终端设置" }
 
+# ---- 6b. WT 的 profile 与 defaultProfile ----
+# settings.json 是 JSONC（默认带 // 注释），不能 ConvertFrom-Json 后整文件重写：
+# 那样一遇到注释就抛错，而且重写会把用户的注释、空行、字段顺序全抹掉。
+if ((Test-Path $wtPkg) -and (Get-Command Update-WtSettings -ErrorAction SilentlyContinue)) {
+    $wt = Join-Path $wtPkg 'LocalState\settings.json'
+    if (Test-Path $wt) {
+        try {
+            $r = Update-WtSettings -Path $wt -PwshPath $PwshPath
+            if ($r.Changed) {
+                Say "    Windows Terminal: 默认配置 -> PowerShell 7（在原文件上定点修改，注释保留）"
+                if ($r.Backup) { Say "    原文件已备份: $($r.Backup)" }
+            } else { Say "    Windows Terminal: 已经是 PowerShell 7，无需修改" }
+        } catch { Say "    Windows Terminal 配置失败: $($_.Exception.Message)" }
+    } else { Say "    未检测到 Windows Terminal 配置，跳过" }
+}
+
+# ---- 6c. VSCode ----
+# VSCode 的 settings.json 同样是 JSONC，而且用户自建的 profile（Ubuntu/WSL 等）要保住，
+# 所以只改「PowerShell 7」这一条，不再整对象替换。
 $vs = Join-Path $env:APPDATA 'Code\User\settings.json'
-if (Test-Path $vs) {
+if ((Test-Path $vs) -and (Get-Command Update-VsCodeSettings -ErrorAction SilentlyContinue)) {
     try {
-        $s = Get-Content $vs -Raw -Encoding UTF8 | ConvertFrom-Json
-        $s | Add-Member -NotePropertyName 'terminal.integrated.defaultProfile.windows' -NotePropertyValue 'PowerShell 7' -Force
-        $s | Add-Member -NotePropertyName 'terminal.integrated.profiles.windows' -NotePropertyValue ([PSCustomObject]@{'PowerShell 7' = [PSCustomObject]@{ path = $PwshPath; icon = 'terminal-powershell' }}) -Force
-        $s | ConvertTo-Json -Depth 10 | Set-Content $vs -Encoding UTF8
-        Say "    VSCode 默认终端 -> PowerShell 7"
+        $rv = Update-VsCodeSettings -Path $vs -PwshPath $PwshPath
+        if ($rv.Changed) {
+            Say "    VSCode 默认终端 -> PowerShell 7"
+            if ($rv.Backup) { Say "    原文件已备份: $($rv.Backup)" }
+        } else { Say "    VSCode 已经是 PowerShell 7，无需修改" }
     } catch { Say "    VSCode 配置失败: $($_.Exception.Message)" }
 } else { Say "    未检测到 VSCode，跳过" }
 
