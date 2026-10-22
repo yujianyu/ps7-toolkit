@@ -292,14 +292,28 @@ if (-not $SkipRustTools) {
     Write-Step 'Rust 高性能命令行工具'
     foreach ($t in $RustTools) {
         $exe = Join-Path $BinDir $t.exe
+        $reused = $false
         if (-not $Force) {
             $found = Find-ExistingRustTool -Name $t.name
             if ($found) {
-                if ($found -ne $exe) {
-                    try { Copy-Item $found $exe -Force; Write-Ok "$($t.name) 已存在(来自 $found)，已复制到 $BinDir" }
-                    catch { Write-Ok "$($t.name) 已存在: $found" }
-                } else { Write-Ok "$($t.name) 已存在，跳过" }
-                continue
+                if ($found -eq $exe) {
+                    Write-Ok "$($t.name) 已存在，跳过"
+                    $reused = $true
+                } else {
+                    try {
+                        Copy-Item $found $exe -Force
+                        # 必须验一下：chocolatey/scoop 装的可能是 shim，
+                        # 单文件复制出去后会找不到真正的 exe（'Cannot find file at ..\lib\...'）
+                        $probe = (& $exe --version 2>&1 | Out-String)
+                        if ($LASTEXITCODE -ne 0 -or -not $probe.Trim()) { throw 'no version output' }
+                        Write-Ok "$($t.name) 已存在(来自 $found)，已复制到 $BinDir"
+                        $reused = $true
+                    } catch {
+                        Write-Warn "$($t.name) 复用 $found 失败（可能是 shim），改为下载安装"
+                        Remove-Item $exe -Force -ErrorAction SilentlyContinue
+                    }
+                }
+                if ($reused) { continue }
             }
         }
         $tag = Get-LatestTag -Repo $t.repo
