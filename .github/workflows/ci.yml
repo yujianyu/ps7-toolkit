@@ -152,3 +152,26 @@ jobs:
           print(f"OK   version     = {data.get('version')}")
           print(f"OK   description = {len(desc)} 字")
           PY
+
+  smoke:
+    name: 安装器回归测试（20 项）
+    runs-on: windows-latest
+    # PR 上跳过：要真实下载约 30MB 工具并在临时目录跑一遍安装，
+    # 只给 main 与手动触发把关，避免每个 PR 都拖几分钟。
+    if: github.event_name != 'pull_request'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 用 Windows PowerShell 5.1 跑冒烟用例
+        shell: powershell
+        run: |
+          .\scripts\smoke-test.ps1
+          exit $LASTEXITCODE
+
+      - name: 上传测试报告
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-report
+          path: ${{ runner.temp }}\ps7-toolkit-smoke-*\result.txt
+          if-no-files-found: ignore

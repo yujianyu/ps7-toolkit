@@ -34,6 +34,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+# 5.1 下 Expand-Archive 的进度条会把屏幕刷成一片 ooooo，且模块内的函数只认全局设置
+$global:ProgressPreference = 'SilentlyContinue'
+$ProgressPreference = 'SilentlyContinue'
 
 $PS7Dir   = Join-Path $ToolsRoot 'ps7'
 $BinDir   = Join-Path $ToolsRoot 'bin'
@@ -50,15 +53,18 @@ $OfficialLinks = @(
 )
 
 # 内置版本表（断网 / API 不可用时兜底）
+# tag 与 asset 必须写「真实的 release tag / 资源文件名」，不能由 pattern 猜：
+#   ripgrep 的 tag 是 15.2.0（无 v）、资源叫 ripgrep-15.2.0-...zip；jq 的 tag 是 jq-1.8.2。
+# 之前只存 ver，GitHub API 被限流回落时拼出的地址全 404，工具会被静默跳过。
 $FALLBACK_PS7 = '7.6.7'
 $CANDIDATE_PS7_VERSIONS = @('7.6.7','7.6.6','7.6.0','7.5.4','7.5.2','7.4.7','7.4.6','7.4.1','7.3.3')
 $RustTools = @(
-  @{ name='rg';    repo='BurntSushi/ripgrep'; pattern='x86_64-pc-windows-msvc.zip'; exe='rg.exe';    ver='15.2.0' },
-  @{ name='fd';    repo='sharkdp/fd';         pattern='x86_64-pc-windows-msvc.zip'; exe='fd.exe';    ver='10.5.0' },
-  @{ name='fzf';   repo='junegunn/fzf';       pattern='windows_amd64.zip';         exe='fzf.exe';   ver='0.74.5' },
-  @{ name='bat';   repo='sharkdp/bat';        pattern='x86_64-pc-windows-msvc.zip'; exe='bat.exe';   ver='0.26.1' },
-  @{ name='delta'; repo='dandavison/delta';   pattern='x86_64-pc-windows-msvc.zip'; exe='delta.exe'; ver='0.20.1' },
-  @{ name='jq';    repo='jqlang/jq';          pattern='jq-windows-amd64.exe';      exe='jq.exe';    ver='1.8.2' }
+  @{ name='rg';    repo='BurntSushi/ripgrep'; tag='15.2.0';   pattern='x86_64-pc-windows-msvc.zip'; exe='rg.exe';    ver='15.2.0'; asset='ripgrep-15.2.0-x86_64-pc-windows-msvc.zip' },
+  @{ name='fd';    repo='sharkdp/fd';         tag='v10.5.0';  pattern='x86_64-pc-windows-msvc.zip'; exe='fd.exe';    ver='10.5.0'; asset='fd-v10.5.0-x86_64-pc-windows-msvc.zip' },
+  @{ name='fzf';   repo='junegunn/fzf';       tag='v0.74.5';  pattern='windows_amd64.zip';         exe='fzf.exe';   ver='0.74.5'; asset='fzf-0.74.5-windows_amd64.zip' },
+  @{ name='bat';   repo='sharkdp/bat';        tag='v0.26.1';  pattern='x86_64-pc-windows-msvc.zip'; exe='bat.exe';   ver='0.26.1'; asset='bat-v0.26.1-x86_64-pc-windows-msvc.zip' },
+  @{ name='delta'; repo='dandavison/delta';   tag='0.20.1';   pattern='x86_64-pc-windows-msvc.zip'; exe='delta.exe'; ver='0.20.1'; asset='delta-0.20.1-x86_64-pc-windows-msvc.zip' },
+  @{ name='jq';    repo='jqlang/jq';          tag='jq-1.8.2'; pattern='jq-windows-amd64.exe';      exe='jq.exe';    ver='1.8.2';  asset='jq-windows-amd64.exe' }
 )
 
 function Write-Step($m) { Write-Host "`n==> $m" -ForegroundColor Cyan }
@@ -134,7 +140,7 @@ function Get-LatestTag {
 # 通过 GitHub API 找到真实的资源文件名与下载地址（asset 名不能靠猜，
 # 例如 ripgrep 的 asset 是 ripgrep-15.2.0-x86_64-pc-windows-msvc.zip）
 function Resolve-ReleaseAssetUrl {
-    param([string]$Repo, [string]$Tag, [string]$Pattern)
+    param([string]$Repo, [string]$Tag, [string]$Pattern, [string]$FallbackAsset)
     try {
         $r = Invoke-RestMethod -Uri "https://api.github.com/repos/$Repo/releases/tags/$Tag" `
              -Headers @{ 'User-Agent'='ps7-toolkit' } -TimeoutSec 25
@@ -143,7 +149,9 @@ function Resolve-ReleaseAssetUrl {
         } | Select-Object -First 1
         if ($a) { return $a.browser_download_url }
     } catch { }
-    return "https://github.com/$Repo/releases/download/$Tag/$Pattern"
+    # API 不可用（限流/断网）：用内置表里的真实资源名拼，别拿 pattern 猜
+    $name = if ($FallbackAsset) { $FallbackAsset } else { $Pattern }
+    return "https://github.com/$Repo/releases/download/$Tag/$name"
 }
 
 # 依次 HEAD 探测候选版本，返回第一个存在的 zip URL
@@ -162,7 +170,10 @@ function Find-LocalZip {
     param([string]$Hint)
     if ($Hint) {
         if (Test-Path $Hint) { return (Resolve-Path $Hint).Path }
-        Write-Warn "-ZipPath 指定的文件不存在: $Hint"
+        # 用户明确指定了安装包，却找不到：直接失败，而不是偷偷改成联网下载
+        Write-Err "-ZipPath 指定的文件不存在: $Hint"
+        Write-Err '请检查路径；或去掉 -ZipPath，让安装器自动搜索/下载。'
+        exit 1
     }
     $dirs = @(
         (Join-Path $env:USERPROFILE 'Downloads'), (Join-Path $env:USERPROFILE 'Desktop'),
@@ -195,14 +206,39 @@ if ($CheckOnly) {
 New-Item -ItemType Directory -Force -Path $ToolsRoot, $BinDir, $CacheDir | Out-Null
 
 # ---- 1. PowerShell 7：探测优先，其次本地 zip，最后自动下载 ----
-$PwshExe = $null
+$PwshExe  = $null
+$Existing = $null
 if (-not $Force) {
     Write-Step '探测已安装的 PowerShell 7'
     $PwshExe = Find-ExistingPwsh
     if ($PwshExe) {
         Write-Ok "发现已安装版本，直接复用: $PwshExe ($(& $PwshExe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'))"
+        if (-not (Test-Path (Join-Path $PS7Dir 'pwsh.exe'))) {
+            Write-Info "未复制到 $PS7Dir —— 沿用系统已有安装，不额外占用磁盘。"
+            Write-Info "要让 pwsh 也放进这个目录，请加 -Force 重新执行（会从本机已有安装复制，不联网）。"
+        }
     } else { Write-Info '未发现，开始下载' }
-} else { Write-Step '强制重装模式' }
+} else {
+    Write-Step '强制重装模式'
+    $Existing = Find-ExistingPwsh
+}
+
+if (-not $PwshExe -and $Existing) {
+    # -Force 且本机已有安装：复制一份到 -ToolsRoot，实现真正「搬到别的盘 / 自包含」，不联网下载
+    $srcDir = Split-Path -Parent $Existing
+    Write-Step "从本机已有安装复制到 $PS7Dir（不联网）"
+    Write-Info "来源: $srcDir"
+    if (Test-Path $PS7Dir) { Remove-Item $PS7Dir -Recurse -Force }
+    New-Item -ItemType Directory -Force -Path $PS7Dir | Out-Null
+    Copy-Item (Join-Path $srcDir '*') $PS7Dir -Recurse -Force
+    $PwshExe = Join-Path $PS7Dir 'pwsh.exe'
+    if (-not (Test-Path $PwshExe)) {
+        Write-Warn '复制失败，改为下载安装'
+        $PwshExe = $null
+    } else {
+        Write-Ok "复制完成: $(& $PwshExe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()')"
+    }
+}
 
 if (-not $PwshExe) {
     Write-Step '准备安装包'
@@ -267,8 +303,11 @@ if (-not $SkipRustTools) {
             }
         }
         $tag = Get-LatestTag -Repo $t.repo
-        if (-not $tag) { $tag = $t.ver }
-        $url = Resolve-ReleaseAssetUrl -Repo $t.repo -Tag $tag -Pattern $t.pattern
+        if (-not $tag) {
+            $tag = $t.tag
+            Write-Info "$($t.name)：GitHub API 不可用，改用内置版本 $tag"
+        }
+        $url = Resolve-ReleaseAssetUrl -Repo $t.repo -Tag $tag -Pattern $t.pattern -FallbackAsset $t.asset
         $dest = Join-Path $CacheDir ([System.IO.Path]::GetFileName($url))
         if (-not (Invoke-Download -Url $url -Dest $dest)) { Write-Warn "$($t.name) 下载失败，跳过"; continue }
         try {
@@ -295,12 +334,26 @@ if (-not $SkipDefaults) {
     else { Write-Warn '找不到 setup-defaults.ps1，跳过默认化' }
 }
 
-# ---- 4. 体检 ----
+# ---- 4. 清理下载缓存（装完就没用了，别留 100MB 垃圾） ----
+if (Test-Path $CacheDir) {
+    $sum = (Get-ChildItem $CacheDir -Recurse -File -ErrorAction SilentlyContinue | Measure-Object Length -Sum).Sum
+    if ($sum -gt 0) {
+        Remove-Item $CacheDir -Recurse -Force -ErrorAction SilentlyContinue
+        Write-Step ("清理下载缓存，释放约 {0} MB" -f [math]::Round($sum/1MB, 1))
+    }
+}
+
+# ---- 5. 体检 ----
 $verify = Join-Path $ScriptDir 'verify.ps1'
-if (Test-Path $verify) { & $verify -ToolsRoot $ToolsRoot -PwshPath $PwshExe -BinDir $BinDir }
+if (Test-Path $verify) {
+    $vargs = @{ ToolsRoot = $ToolsRoot; PwshPath = $PwshExe; BinDir = $BinDir }
+    if ($SkipDefaults) { $vargs['SkipDefaults'] = $true }
+    & $verify @vargs
+}
 
 Write-Host "`n########## 完成 ##########" -ForegroundColor Magenta
 Write-Host "PowerShell 7 : $PwshExe"
 Write-Host "Rust 工具    : $BinDir"
 Write-Host "立即试用     : & '$PwshExe' -NoProfile -Command '`$PSVersionTable.PSVersion'"
 Write-Host "提示: 重新打开终端/应用后 PATH 才生效`n"
+exit 0

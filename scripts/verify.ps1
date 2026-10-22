@@ -10,13 +10,17 @@
     指定 Rust 工具目录。不填则自动探测。
 .PARAMETER Json
     额外输出 JSON（便于其它程序解析）
+.PARAMETER SkipDefaults
+    安装时用了 -SkipDefaults（只装不配）：此时不检查 profile / 注册表 / 快捷方式 / PATH，
+    这些项目会标成「已跳过」而不是「失败」。
 #>
 [CmdletBinding()]
 param(
     [string]$ToolsRoot = (Join-Path $env:LOCALAPPDATA 'ps7-toolkit'),
     [string]$PwshPath,
     [string]$BinDir,
-    [switch]$Json
+    [switch]$Json,
+    [switch]$SkipDefaults
 )
 
 $ErrorActionPreference = 'SilentlyContinue'
@@ -43,11 +47,6 @@ if (-not $PwshPath) {
 }
 if (-not $BinDir) {
     $BinDir = Join-Path $ToolsRoot 'bin'
-    if (-not (Test-Path $BinDir)) {
-        foreach ($c in @((Join-Path $env:LOCALAPPDATA 'ps7-toolkit\bin'), 'G:\Tools\bin')) {
-            if (Test-Path $c) { $BinDir = $c; break }
-        }
-    }
 }
 
 # 1. PowerShell 7
@@ -84,41 +83,63 @@ $report['binDir'] = $BinDir
 
 # 3. profile
 Write-Host "`n[3] PowerShell profile（UTF-8 根治）"
-$docs = [Environment]::GetFolderPath('MyDocuments')
-foreach ($p in @((Join-Path $docs 'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'), (Join-Path $docs 'PowerShell\Microsoft.PowerShell_profile.ps1'))) {
-    if ((Test-Path $p) -and ((Get-Content $p -Raw) -match 'ps7-toolkit')) { Write-Host "    [OK] $p" -ForegroundColor Green }
-    else { Write-Host "    [X] $p" -ForegroundColor Red }
+if ($SkipDefaults) {
+    Write-Host "    [-] 已跳过（-SkipDefaults 只装不配）" -ForegroundColor DarkGray
+} else {
+    $docs = [Environment]::GetFolderPath('MyDocuments')
+    foreach ($p in @((Join-Path $docs 'WindowsPowerShell\Microsoft.PowerShell_profile.ps1'), (Join-Path $docs 'PowerShell\Microsoft.PowerShell_profile.ps1'))) {
+        if ((Test-Path $p) -and ((Get-Content $p -Raw) -match 'ps7-toolkit')) { Write-Host "    [OK] $p" -ForegroundColor Green }
+        else { Write-Host "    [X] $p" -ForegroundColor Red }
+    }
 }
 
 # 4. 注册表与关联
 Write-Host "`n[4] 注册表与文件关联"
-foreach ($c in @(
-    @{ n = 'App Paths\pwsh.exe'; p = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe' },
-    @{ n = '.ps1 关联';         p = 'HKCU:\Software\Microsoft\Classes\.ps1\shell\open\command' },
-    @{ n = '默认终端(Terminal)'; p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' })) {
-    if (Test-Path $c.p) { Write-Host ("    [OK] " + $c.n) -ForegroundColor Green }
-    else { Write-Host ("    [X] " + $c.n) -ForegroundColor Red }
+if ($SkipDefaults) {
+    Write-Host "    [-] 已跳过（-SkipDefaults 只装不配）" -ForegroundColor DarkGray
+} else {
+    foreach ($c in @(
+        @{ n = 'App Paths\pwsh.exe'; p = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\pwsh.exe' },
+        @{ n = '.ps1 关联';         p = 'HKCU:\Software\Microsoft\Classes\.ps1\shell\open\command' },
+        @{ n = '默认终端(Terminal)'; p = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced' })) {
+        if (Test-Path $c.p) { Write-Host ("    [OK] " + $c.n) -ForegroundColor Green }
+        else { Write-Host ("    [X] " + $c.n) -ForegroundColor Red }
+    }
 }
 
 # 5. 应用层
 Write-Host "`n[5] 应用层配置"
-$lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\PowerShell 7.lnk'
-if (Test-Path $lnk) { Write-Host "    [OK] 开始菜单 PowerShell 7" -ForegroundColor Green } else { Write-Host "    [X] 开始菜单 PowerShell 7" -ForegroundColor Red }
-$wt = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
-if (Test-Path $wt) {
-    $c = Get-Content $wt -Raw -Encoding UTF8 | ConvertFrom-Json
-    $hit = $c.profiles.list | Where-Object { $_.name -eq 'PowerShell 7' }
-    if ($hit -and $c.defaultProfile -eq $hit.guid) { Write-Host "    [OK] Windows Terminal 默认 = PS7" -ForegroundColor Green }
-    else { Write-Host "    [!] Windows Terminal 未指向 PS7" -ForegroundColor Yellow }
-} else { Write-Host "    [-] 未安装 Windows Terminal" -ForegroundColor DarkGray }
+if ($SkipDefaults) {
+    Write-Host "    [-] 已跳过（-SkipDefaults 只装不配）" -ForegroundColor DarkGray
+} else {
+    $lnk = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\PowerShell 7.lnk'
+    if (Test-Path $lnk) { Write-Host "    [OK] 开始菜单 PowerShell 7" -ForegroundColor Green } else { Write-Host "    [X] 开始菜单 PowerShell 7" -ForegroundColor Red }
+    $wt = Join-Path $env:LOCALAPPDATA 'Packages\Microsoft.WindowsTerminal_8wekyb3d8bbwe\LocalState\settings.json'
+    if (Test-Path $wt) {
+        $c = Get-Content $wt -Raw -Encoding UTF8 | ConvertFrom-Json
+        $hit = $c.profiles.list | Where-Object { $_.name -eq 'PowerShell 7' }
+        if ($hit -and $c.defaultProfile -eq $hit.guid) { Write-Host "    [OK] Windows Terminal 默认 = PS7" -ForegroundColor Green }
+        else { Write-Host "    [!] Windows Terminal 未指向 PS7" -ForegroundColor Yellow }
+    } else { Write-Host "    [-] 未安装 Windows Terminal" -ForegroundColor DarkGray }
+}
 
 # 6. PATH
 Write-Host "`n[6] PATH"
-$up = [Environment]::GetEnvironmentVariable('Path','User')
-$ps7dir = if ($PwshPath) { Split-Path -Parent $PwshPath } else { $null }
-foreach ($d in @($ps7dir, $BinDir)) {
-    if (-not $d) { continue }
-    if ($up -like "*$d*") { Write-Host "    [OK] $d" -ForegroundColor Green } else { Write-Host "    [X] $d 不在用户 PATH" -ForegroundColor Red }
+if ($SkipDefaults) {
+    Write-Host "    [-] 已跳过（-SkipDefaults 不改 PATH）" -ForegroundColor DarkGray
+} else {
+    $up = [Environment]::GetEnvironmentVariable('Path','User')
+    $ps7dir = if ($PwshPath) { Split-Path -Parent $PwshPath } else { $null }
+    if (-not $up) { $up = '' }
+    foreach ($d in @($ps7dir, $BinDir)) {
+        if (-not $d) { continue }
+        if ($up.IndexOf($d, [StringComparison]::OrdinalIgnoreCase) -ge 0) {
+            Write-Host "    [OK] $d" -ForegroundColor Green
+        } else {
+            # 目录能用但没进 PATH：不算失败，只是新开的终端里敲不到短命令
+            Write-Host "    [!] $d 不在用户 PATH（工具本身可用，需用绝对路径或手动加 PATH）" -ForegroundColor Yellow
+        }
+    }
 }
 
 if ($Json) { Write-Host "`n----JSON----"; Write-Host ($report | ConvertTo-Json -Depth 6) }

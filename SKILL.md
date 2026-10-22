@@ -1,6 +1,6 @@
 ---
 name: powershell7-toolkit
-version: "1.1.1"
+version: "1.1.3"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
@@ -50,7 +50,7 @@ powershell -ExecutionPolicy Bypass -File "<技能目录>\scripts\install.ps1"
 | `-Mirror "https://your.mirror/"` | 自定义下载镜像（会插到内置列表最前） |
 | `-SkipDefaults` | 只装不配（不改系统默认） |
 | `-SkipRustTools` | 只装 PowerShell 7 |
-| `-Force` | 强制重装（忽略已安装检测） |
+| `-Force` | 强制在 `-ToolsRoot` 下放一份完整 pwsh：本机已装则复制（约 5 秒），没装才下载 |
 | `-CheckOnly` | 只体检，不做任何改动 |
 
 **特性**：幂等（重复跑只补缺失项）、免管理员权限、不依赖 Python、不写死盘符、断网可用、卸载只需删目录 + 3 个注册表项。
@@ -100,6 +100,7 @@ assets/icon.png                   512x512 图标
 scripts/install.ps1               主安装器（幂等，跨机器）
 scripts/setup-defaults.ps1        默认化（profile/注册表/文件关联/快捷方式/终端/VSCode）
 scripts/verify.ps1                体检脚本，输出诊断报告
+scripts/smoke-test.ps1            20 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
 references/troubleshooting.md     踩坑与排错
 CHANGELOG.md                      版本记录
 ```

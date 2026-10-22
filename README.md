@@ -123,12 +123,22 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ZipPath "D:\�
 | `-SkipDefaults` | 只装不配，不动系统默认（不写 profile、不改注册表、不建快捷方式） |
 | `-SkipRustTools` | 只装 PowerShell 7，不装那 6 个 Rust 工具 |
 | `-CheckOnly` | 只体检，不做任何改动 |
-| `-Force` | 强制重装，忽略已安装检测 |
+| `-Force` | 强制在 `-ToolsRoot` 下放一份完整的 pwsh。本机已装就直接复制（约 5 秒），没装才联网下载 |
+
+> 有一点容易误会：不加 `-Force` 时，如果本机已经装了 PowerShell 7，安装器会**复用**那一份，
+> 不会复制到 `-ToolsRoot`（省 300MB 磁盘）。所以想让 pwsh 也落到 `D:\Tools\ps7` 这种自定义目录，
+> 要加 `-Force`。安装时会明确打印「未复制到 …」，不会让你蒙在鼓里。
 
 例子——装到别的盘、只装主程序：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ToolsRoot "D:\Tools\ps7" -SkipRustTools
+```
+
+例子——把 pwsh 真正搬到 D 盘（本机已有安装则复制，不下载）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\install.ps1" -ToolsRoot "D:\Tools\ps7" -Force
 ```
 
 ---
@@ -209,6 +219,20 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
 它会分 6 段检查并给出报告：PowerShell 7 / Rust 工具 / profile 编码设置 / 注册表与文件关联 / 应用层配置 / PATH。
 
 加 `-Json` 可以输出机器可读结果。
+
+### 自己跑回归测试
+
+安装器改过之后，可以跑一遍冒烟测试确认没弄坏东西：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ".\scripts\smoke-test.ps1"
+```
+
+20 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
+覆盖：只读体检、隔离安装、6 个工具是否真能跑、幂等（连跑两次二进制一致）、
+`-Force` 是否走复制而不是下载、中文 + 空格路径、错误参数处理、卸载是否干净。
+
+退出码 `0` 表示全过，`1` 表示有失败——所以它也能直接塞进 CI。
 
 更多踩坑记录见 [references/troubleshooting.md](references/troubleshooting.md)，涵盖：装完 `pwsh` 找不到、中文还是乱码、双击 `.ps1` 提示没有关联、镜像下载卡住、Windows Terminal 没跟着切等。
 
@@ -300,7 +324,8 @@ ps7-toolkit/
 ├── scripts/
 │   ├── install.ps1               主安装器（探测优先 + 自动下载兜底）
 │   ├── setup-defaults.ps1        默认化（profile / 注册表 / 关联 / 快捷方式 / 终端）
-│   └── verify.ps1                六段体检
+│   ├── verify.ps1                六段体检
+│   └── smoke-test.ps1            20 项回归测试（隔离沙箱，不碰系统配置）
 └── references/
     └── troubleshooting.md        踩坑与排错
 ```
