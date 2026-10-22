@@ -154,7 +154,7 @@ jobs:
           PY
 
   smoke:
-    name: 安装器回归测试（20 项）
+    name: 安装器回归测试（23 项）
     runs-on: windows-latest
     # PR 上跳过：要真实下载约 30MB 工具并在临时目录跑一遍安装，
     # 只给 main 与手动触发把关，避免每个 PR 都拖几分钟。
