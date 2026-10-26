@@ -1,6 +1,6 @@
 ---
 name: powershell7-toolkit
-version: "1.1.6"
+version: "1.1.7"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
