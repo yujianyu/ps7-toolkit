@@ -1,4 +1,4 @@
-﻿---
+---
 name: powershell7-toolkit
 version: "1.1.6"
 display_name: "PowerShell 7 工具链"
@@ -174,7 +174,7 @@ scripts/setup-defaults.ps1        默认化（profile/注册表/文件关联/快
 scripts/verify.ps1                体检脚本，输出诊断报告
 scripts/wt-config.ps1             WT/VSCode 配置的文本级改写（保留注释，可被测试单独调用）
 scripts/shell-guard.ps1           反引号/特殊字符守卫（bash 命令替换与 pwsh 转义符诊断 + 安全改写 + 执行拦截）
-scripts/smoke-test.ps1            61 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
+scripts/smoke-test.ps1            62 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
 references/troubleshooting.md     踩坑与排错
 CHANGELOG.md                      版本记录
 ```

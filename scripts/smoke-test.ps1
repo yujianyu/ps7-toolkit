@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    安装器回归测试（冒烟测试）—— 61 项断言，本机约 1~2 分钟跑完。
+    安装器回归测试（冒烟测试）—— 62 项断言，本机约 1~2 分钟跑完。
 .DESCRIPTION
     全部在临时目录里跑，读系统、不写系统默认（用 -SkipDefaults），跑完自动清理。
     覆盖：只读体检、隔离安装、幂等、-Force 复制、中文+空格路径、错误参数、卸载。
@@ -466,6 +466,15 @@ if ($guardReady) {
     $rraw = [System.IO.File]::ReadAllText($rpath, [System.Text.Encoding]::UTF8)
     $doc61 = (($rraw -match '-Capture') -and ($rraw -match '归一') -and ($rraw -match '开发者备注'))
     T 'T61 README 三处契约齐备（-Capture 契约 / 退出码归一 / 开发者备注）' { @{ ok = $doc61; detail = "关键词=$((($rraw -match '-Capture'),($rraw -match '归一'),($rraw -match '开发者备注')) -join ',')" } }
+
+    # T62：SKILL.md 的 frontmatter 必须从第一个字节开始（不能有 UTF-8 BOM）。
+    #      带 BOM 时 `---` 前面多出 \ufeff，市场侧的 YAML 解析会失败 → display_name / description
+    #      全部回落成文件夹名（线上真的变成过「Ps7 Toolkit」）。
+    $sk69 = [System.IO.File]::ReadAllBytes((Join-Path (Split-Path -Parent $PSScriptRoot) 'SKILL.md'))
+    $noBom = ($sk69.Length -gt 3 -and $sk69[0] -eq 0x2D -and $sk69[1] -eq 0x2D -and $sk69[2] -eq 0x2D)
+    $skText = [System.IO.File]::ReadAllText((Join-Path (Split-Path -Parent $PSScriptRoot) 'SKILL.md'), [System.Text.Encoding]::UTF8)
+    $hasFields = ($skText -match '(?m)^display_name:' -and $skText -match '(?m)^version:')
+    T 'T62 SKILL.md 无 BOM 且首字节为 ---（否则市场解析不到 display_name）' { @{ ok = ($noBom -and $hasFields); detail = "首3字节=$([char]$sk69[0])$([char]$sk69[1])$([char]$sk69[2]) 字段齐备=$hasFields" } }
 } else {
     T 'T41 反引号守卫脚本存在' { @{ ok = $false; detail = '缺少 shell-guard.ps1' } }
 }
