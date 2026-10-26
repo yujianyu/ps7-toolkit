@@ -1,7 +1,7 @@
 ﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
-    安装器回归测试（冒烟测试）—— 40 项断言，本机约 1~2 分钟跑完。
+    安装器回归测试（冒烟测试）—— 61 项断言，本机约 1~2 分钟跑完。
 .DESCRIPTION
     全部在临时目录里跑，读系统、不写系统默认（用 -SkipDefaults），跑完自动清理。
     覆盖：只读体检、隔离安装、幂等、-Force 复制、中文+空格路径、错误参数、卸载。
@@ -355,6 +355,120 @@ $oldHint = ($setupCode.Contains("Join-Path `$exp 'rg.exe'")) -and
 T 'T40 检测到旧工具目录并存时打印提示（且绝不自动删除）' { @{ ok = $oldHint; detail = "含检测与提示 = $oldHint" } }
 
 
+# ---- 13. 反引号守卫（shell-guard） ----
+Write-Host "`n=== 13. 反引号与特殊字符守卫 ===" -ForegroundColor Cyan
+
+$guardPath  = Join-Path $PSScriptRoot 'shell-guard.ps1'
+$guardReady = Test-Path $guardPath
+if ($guardReady) { . $guardPath }
+
+if ($guardReady) {
+    $d1 = Get-ShellQuoteDiagnosis -Command 'echo today is `date`' -Shell 'bash'
+    T 'T41 bash 成对反引号：判风险并给出 $( ) 改写' { @{ ok = ($d1.Risky -and $d1.Backticks -eq 2 -and $d1.SafeForm -eq 'echo today is $(date)'); detail = "risky=$($d1.Risky) n=$($d1.Backticks) safe=$($d1.SafeForm)" } }
+
+    $d2 = Get-ShellQuoteDiagnosis -Command 'echo a` b' -Shell 'bash'
+    T 'T42 bash 奇数个裸反引号：判风险且不做自动改写' { @{ ok = ($d2.Risky -and $d2.Backticks -eq 1 -and -not $d2.SafeForm); detail = "risky=$($d2.Risky) n=$($d2.Backticks) safe=$($d2.SafeForm)" } }
+
+    $d3 = Get-ShellQuoteDiagnosis -Command "echo 'a`b'" -Shell 'bash'
+    T 'T43 单引号内的反引号判为安全' { @{ ok = (-not $d3.Risky -and $d3.Backticks -eq 0); detail = "risky=$($d3.Risky) n=$($d3.Backticks)" } }
+
+    $d4 = Get-ShellQuoteDiagnosis -Command 'cat > x.md <<EOF'  -Shell 'bash'
+    $d5 = Get-ShellQuoteDiagnosis -Command "cat > x.md <<'EOF'" -Shell 'bash'
+    T 'T44 heredoc：未加引号报警，加了单引号不报' { @{ ok = ($d4.Risky -and -not $d5.Risky); detail = "raw=$($d4.Risky) quoted=$($d5.Risky)" } }
+
+    $d6 = Get-ShellQuoteDiagnosis -Command 'Write-Host "a`nb"' -Shell 'pwsh'
+    T 'T45 pwsh 视角：识别转义符反引号' { @{ ok = ($d6.Risky -and $d6.Backticks -ge 1); detail = "risky=$($d6.Risky) n=$($d6.Backticks)" } }
+
+    $rcGuard = Invoke-SafeCommand -Command 'Write-Host "a`nb"'
+    T 'T46 有风险时拒绝执行（返回 2）' { @{ ok = ($rcGuard -eq 2); detail = "rc=$rcGuard" } }
+
+    $d7 = Get-ShellQuoteDiagnosis -Command 'cd C:\Users\x && dir' -Shell 'bash'
+    $d8 = Get-ShellQuoteDiagnosis -Command "cd 'C:\Users\x'" -Shell 'bash'
+    T 'T47 bash 引号外 Windows 路径判风险，单引号包裹后安全' { @{ ok = ($d7.Risky -and $d7.Backticks -eq 0 -and -not $d8.Risky); detail = "raw=$($d7.Risky) quoted=$($d8.Risky)" } }
+
+    $d9  = Get-ShellQuoteDiagnosis -Command 'curl https://example.com' -Shell 'pwsh'
+    $d10 = Get-ShellQuoteDiagnosis -Command 'curl.exe https://example.com' -Shell 'pwsh'
+    T 'T48 pwsh：裸 curl 提醒写 curl.exe，curl.exe 不提醒' { @{ ok = (($d9.Advice | Where-Object { $_ -like '*curl.exe*' }).Count -gt 0 -and ($d10.Advice | Where-Object { $_ -like '*别名*' }).Count -eq 0 -and -not $d10.Risky); detail = "bare=$($d9.Advice.Count) 条 exe=$($d10.Advice.Count) 条" } }
+
+    $d11 = Get-ShellQuoteDiagnosis -Command 'a && b' -Shell 'pwsh'
+    T 'T49 pwsh：&& 提醒 5.1 不支持（不判硬风险）' { @{ ok = (-not $d11.Risky -and ($d11.Advice | Where-Object { $_ -like '*&&*' }).Count -gt 0); detail = "risky=$($d11.Risky) advice=$($d11.Advice.Count)" } }
+
+    $d12 = Get-ShellQuoteDiagnosis -Command 'Get-Content a.txt | Out-File b.txt' -Shell 'pwsh'
+    $d13 = Get-ShellQuoteDiagnosis -Command 'Get-Content a.txt | Out-File b.txt -Encoding utf8' -Shell 'pwsh'
+    T 'T50 pwsh：Out-File 无 -Encoding 提醒编码，加了不提醒' { @{ ok = (($d12.Advice | Where-Object { $_ -like '*UTF-16*' }).Count -gt 0 -and ($d13.Advice | Where-Object { $_ -like '*UTF-16*' }).Count -eq 0); detail = "no-enc=$($d12.Advice.Count) 条 enc=$($d13.Advice.Count) 条" } }
+
+    # ---- 1.1.6 内测反馈防回归（豆包 v1.1.6 测试报告）----
+    # T51：曾因参数名 -Command 撞 powershell.exe 自身开关，转发含双引号命令时错位成
+    #      「文件不存在: executed」rc=3。改名 -Text 后：① 参数块必须是 $Text；
+    #      ② 含双引号的命令可 & 直调且不错位（& 直调引号完全保真，任何父进程都成立；
+    #         5.1 下 Write-Host 提示不走 2>&1，故只断言无错位报错，功能端到端由 T52 覆盖）。
+    $o51 = & $guardPath -Text 'Write-Output "safe executed"' 2>&1
+    $s51 = ($o51 | Out-String)
+    $g51 = Get-Content $guardPath -Raw
+    T 'T51 参数已改名 -Text 且含双引号命令 & 直调无错位（防 -Command 撞名回归）' { @{ ok = (($g51 -match '\[string\]\$Text') -and ($g51 -notmatch '\.PARAMETER Command') -and ($s51 -notmatch '文件不存在')); detail = "param改名=$($g51 -match '\[string\]\$Text') 错位残留=$($s51 -match '文件不存在')" } }
+
+    # T52：-Execute 安全命令曾因 exit (函数) 括号把内层输出吞进表达式，执行结果「消失」。
+    #      命令特意带内层双引号，顺带端到端验证 & 直调下引号保真。
+    $o52 = & $guardPath -Text 'Write-Output "guard-marker-t52"' -Execute 2>&1
+    $s52 = ($o52 | Out-String)
+    T 'T52 -Execute 安全命令：内层输出必须可见且 rc=0' { @{ ok = ($LASTEXITCODE -eq 0 -and $s52 -match 'guard-marker-t52'); detail = "exit=$LASTEXITCODE marker可见=$($s52 -match 'guard-marker-t52')" } }
+
+    # T53：-File 检查脚本文件曾因参数改名后赋错变量而静默不干活。
+    $tmp53 = Join-Path $base 'guard-file-case.ps1'
+    Set-Content -Path $tmp53 -Value 'Write-Output "a`nb"' -Encoding UTF8
+    & $guardPath -File $tmp53 2>&1 | Out-Null
+    $rc53 = $LASTEXITCODE
+    Remove-Item $tmp53 -ErrorAction SilentlyContinue
+    T 'T53 -File 检查含反引号脚本：正确判风险 rc=1（不静默）' { @{ ok = ($rc53 -eq 1); detail = "exit=$rc53" } }
+
+    # T54：verify 对第三方死链的文案必须区分「本工具自动清 / 第三方手动处理」。
+    $vraw = Get-Content (Join-Path $PSScriptRoot 'verify.ps1') -Raw
+    T 'T54 verify 死链文案区分本工具与第三方路径' { @{ ok = (($vraw -match '会自动清掉') -and ($vraw -match '第三方路径失效')); detail = "本工具文案=$($vraw -match '会自动清掉') 第三方文案=$($vraw -match '第三方路径失效')" } }
+
+    # ---- 1.1.6 二轮内测防回归（DeepSeek v1.1.6 审查报告）----
+    # T55：-Execute 曾用 -Command 跨进程转发，内层双引号在 argv 层被切散——
+    #      Write-Output "hello  world  spaced" 输出 3 行（5.1 与 pwsh 7 均丢）。
+    #      改为 -EncodedCommand 后必须单行且连续空格原样保留。
+    $o55 = & $guardPath -Text 'Write-Output "hello  world  spaced"' -Execute 2>&1
+    $hit55 = @($o55 | Where-Object { "$_" -match 'hello' })
+    T 'T55 -Execute 引号保真：双引号与连续空格原样保留（防 -Command 转发改写命令）' { @{ ok = ($hit55.Count -eq 1 -and ("$($hit55[0])" -match 'hello  world  spaced')); detail = "条数=$($hit55.Count) 内容=[$($hit55[0])]" } }
+
+    # T56：-Execute 纯 PS 命令抛错时曾因 $LASTEXITCODE 为 null 返回 0（报错却报成功）。
+    & $guardPath -Text 'throw "boom"' -Execute 2>&1 | Out-Null
+    $rc56 = $LASTEXITCODE
+    T 'T56 -Execute 纯 PS 命令抛错：退出码 1（报错不报成功）' { @{ ok = ($rc56 -eq 1); detail = "exit=$rc56" } }
+
+    # T57：ConvertTo-SafeCommand 曾无条件改写成对反引号，段内含 ' 或 $ 时语义会变。
+    $d57a = Get-ShellQuoteDiagnosis -Command 'echo `$env:FOO`' -Shell 'bash'
+    $d57b = Get-ShellQuoteDiagnosis -Command 'echo today is `date`' -Shell 'bash'
+    T 'T57 改写保真：段内含 $ 不自动改写，纯命令替换仍给出 $( ) 改写' { @{ ok = (-not $d57a.SafeForm -and $d57b.SafeForm -eq 'echo today is $(date)'); detail = "含dollar改写=$($d57a.SafeForm) 纯替换改写=$($d57b.SafeForm)" } }
+    # ---- 1.1.6 三轮内测防回归（DeepSeek v1.1.6 第三轮报告）----
+    # T58：Invoke-SafeCommand 曾把子进程输出与退出码混进同一个返回流，$rc 变成 Object[]，
+    #      任何 if ($rc -ne 0) 恒真。默认模式必须只返回 int。
+    $r58 = Invoke-SafeCommand -Command 'Write-Output "hello  world  spaced"'
+    T 'T58 Invoke-SafeCommand 默认只返回 int 退出码（不被输出污染）' { @{ ok = ($r58 -is [int] -and @($r58).Count -eq 1 -and $r58 -eq 0); detail = "type=$($r58.GetType().Name) count=$(@($r58).Count) value=$r58" } }
+
+    # T59：stderr 曾与 stdout 混流并被 ErrorRecord 展开成多行（带 CategoryInfo / caret 定位），
+    #      现在必须加 [stderr] 前缀且压成单行。
+    $o59 = Invoke-SafeCommand -Command 'Write-Error "boom-stderr"' -Capture
+    $err59 = @($o59 | Where-Object { "$_" -like '`[stderr`]*' })
+    $flat59 = ($err59.Count -eq 1 -and ("$($err59[0])" -notmatch 'CategoryInfo|FullyQualifiedErrorId') -and ("$($err59[0])" -notmatch "`n"))
+    T 'T59 stderr 单独标记前缀并压成单行（不再混进 stdout 多行展开）' { @{ ok = $flat59; detail = "前缀条数=$($err59.Count) 内容=[$($err59[0])]" } }
+
+    # T60：-Capture 模式下输出走管道、退出码留在 GuardLastExitCode，函数不返回值。
+    $o60 = Invoke-SafeCommand -Command 'Write-Output "cap-marker-60"' -Capture
+    T 'T60 -Capture：输出进管道、退出码在 GuardLastExitCode、函数无返回值' { @{ ok = ($o60 -eq 'cap-marker-60' -and $GuardLastExitCode -eq 0); detail = "输出=[$o60] rc=$GuardLastExitCode" } }
+
+    # T61：文档防漂移 —— 返回值契约 / 原生命令退出码归一 / 开发者备注（测引号保真别用 -Command 对照组）
+    #      三项都必须落在 README 里，否则下一个改守卫的人还会踩。
+    #      注意：README 是无 BOM 的 UTF-8，5.1 的 Get-Content 默认按 ANSI 读会变乱码，必须显式按 UTF-8 读。
+    $rpath = Join-Path (Split-Path -Parent $PSScriptRoot) 'README.md'
+    $rraw = [System.IO.File]::ReadAllText($rpath, [System.Text.Encoding]::UTF8)
+    $doc61 = (($rraw -match '-Capture') -and ($rraw -match '归一') -and ($rraw -match '开发者备注'))
+    T 'T61 README 三处契约齐备（-Capture 契约 / 退出码归一 / 开发者备注）' { @{ ok = $doc61; detail = "关键词=$((($rraw -match '-Capture'),($rraw -match '归一'),($rraw -match '开发者备注')) -join ',')" } }
+} else {
+    T 'T41 反引号守卫脚本存在' { @{ ok = $false; detail = '缺少 shell-guard.ps1' } }
+}
 # ---------------------------------------------------------------- 汇总
 Write-Host "`n########## 结果 ##########" -ForegroundColor Magenta
 $pass = ($results | Where-Object { $_.ok }).Count

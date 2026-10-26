@@ -223,6 +223,60 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
 
 加 `-Json` 可以输出机器可读结果。
 
+## 反引号与特殊字符（AI 执行前必读）
+
+反引号在 **bash（Git Bash / MSYS2）里是命令替换**，在 **pwsh 里是转义符**——同一个字符，两种危险：
+
+```bash
+echo `date`        # bash：date 被真的执行，输出塞回命令行
+Write-Host "a`nb"  # pwsh：反引号吞掉 n，"a`nb" 变成换行
+cat <<EOF ... EOF  # 未加引号的 heredoc：正文里的 ` 和 $ 会被展开后再落盘
+```
+
+**规则**：命令替换写 `$(date)`；字面反引号放单引号 `'...`...'`；写文件用 `cat <<'EOF'`；
+长命令 / 嵌套引号写成 `.ps1` 文件再用 `pwsh -File` 跑。
+
+**拿不准就先过守卫**（只读诊断，不改系统）：
+
+```powershell
+& ".\scripts\shell-guard.ps1" -Text 'echo 今天是 `date`'      # 会话内直调，引号保真
+pwsh -NoProfile -ExecutionPolicy Bypass -File ".\scripts\shell-guard.ps1" -File .\build.ps1 -Shell pwsh
+```
+
+退出码：`0` 安全 / `1` 发现风险 / `2` 有风险拒绝执行（配合 `-Execute`）/ `3` 文件不存在。
+加 `-Execute` 先诊断再执行，有风险默认拒绝，`-Force` 放行。
+
+> **退出码的归一说明**：`-Execute` 里原生命令的非零退出码统一归一为 `1`（不精确透传原值）。
+> 原因是精确透传要靠残余的 `$LASTEXITCODE`，会把上一条命令的码带进判断里，得不偿失。
+> 需要精确码就直接自己跑：`& <命令>; $LASTEXITCODE`。
+
+守卫还会顺带检查高频坑：bash 引号外的 Windows 路径（`C:\Users` 的反斜杠被吃掉，判硬风险）；
+pwsh 口径下提醒 5.1 的 curl 别名（写 `curl.exe`）、`&&` 不支持、`Out-File` 默认 UTF-16。
+
+> **调用方式**：参数名是 `-Text`（不是 `-Command`，避免撞上 powershell.exe 自身开关）。
+> 引号保真实测结论：会话内 `&` 直调保真；守卫 `-Execute` 内部走 `-EncodedCommand` 保真；
+> **任何 `-Command` 式跨进程转发一律丢内层双引号（5.1 与 pwsh 7 实测均丢，
+> `git commit -m "a  b"` 会变成另一条命令）**，别当兜底；跨进程调守卫用 pwsh 7 的 `-File`。
+
+> 从 bash 调守卫时 `-Text` 后面必须**用单引号**，否则反引号在到达守卫前就被 bash 吃掉了。
+
+**在脚本里调用守卫函数**（dot-source 后可用，两种模式互斥，输出和退出码不会混在一起）：
+
+```powershell
+. .\scripts\shell-guard.ps1
+
+# 默认：输出直接显示在控制台，返回值只有 int 退出码
+$rc = Invoke-SafeCommand -Command 'Get-Content a.txt | Measure-Object -Line'
+if ($rc -ne 0) { '失败了' }
+
+# -Capture：输出走管道（可赋值），退出码在 $GuardLastExitCode
+$out = Invoke-SafeCommand -Command 'git status --porcelain' -Capture
+if ($GuardLastExitCode -ne 0) { '失败了' }
+```
+
+> 子进程的 stderr 会加 `[stderr] ` 前缀并压成单行，不会和 stdout 混在一起。
+> 注意别写 `exit (Invoke-SafeCommand ...)`——括号会把输出吞进表达式。
+
 ### 自己跑回归测试
 
 安装器改过之后，可以跑一遍冒烟测试确认没弄坏东西：
@@ -231,11 +285,17 @@ powershell -ExecutionPolicy Bypass -File ".\scripts\verify.ps1"
 powershell -ExecutionPolicy Bypass -File ".\scripts\smoke-test.ps1"
 ```
 
-38 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
+60 项断言，约 1~2 分钟，全程在临时目录里跑、**不碰你的系统配置**（用 `-SkipDefaults`），跑完自动清理。
 覆盖：只读体检、隔离安装、6 个工具是否真能跑、幂等（连跑两次二进制一致）、
-`-Force` 是否走复制而不是下载、中文 + 空格路径、错误参数处理、卸载是否干净。
+`-Force` 是否走复制而不是下载、中文 + 空格路径、错误参数处理、卸载是否干净，
+以及反引号守卫的 20 项（诊断口径、引号保真、stderr 前缀、返回值契约、拒绝执行）。
 
 退出码 `0` 表示全过，`1` 表示有失败——所以它也能直接塞进 CI。
+
+**开发者备注（改守卫的人必看）**：测引号保真时，跨进程一律用 `-File` + 文件承载命令串，
+或 `-EncodedCommand`；**千万别拿 `-Command "<含内层双引号的字符串>"` 当对照组**——
+对照组自己就会走 argv 层把引号切散，于是「被测组和对照组都坏」，看起来像「都没问题」。
+这个坑我们在 1.1.6 里真踩过两次。
 
 更多踩坑记录见 [references/troubleshooting.md](references/troubleshooting.md)，涵盖：装完 `pwsh` 找不到、中文还是乱码、双击 `.ps1` 提示没有关联、镜像下载卡住、Windows Terminal 没跟着切等。
 

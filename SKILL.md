@@ -1,6 +1,6 @@
----
+﻿---
 name: powershell7-toolkit
-version: "1.1.5"
+version: "1.1.6"
 display_name: "PowerShell 7 工具链"
 display_name_en: "PowerShell 7 Toolkit"
 author: "欣欣 (YUJIANYU)"
@@ -28,6 +28,7 @@ metadata:
 - 中文在 PowerShell / cmd / 第三方工具输出里乱码
 - 想用 ripgrep 等 Rust 工具加速检索
 - 要把 pwsh 设为系统默认 shell
+- AI 生成的命令里带反引号，在 bash 或 pwsh 里被吃掉、误执行、或写出的文件缺字少符（见第六节）
 
 ## 二、安装（一条命令）
 
@@ -73,6 +74,8 @@ powershell -ExecutionPolicy Bypass -File "<技能目录>\scripts\install.ps1"
    rg -n --no-heading -e "关键词" -g "*.py" C:\path
    ```
 5. **输出乱码时**先查 `[Console]::OutputEncoding` 和 `$OutputEncoding` 是否为 UTF-8（profile 已自动设置）。
+6. **命令里有反引号时先过守卫**（`shell-guard.ps1`，见第六节），或写成 `.ps1` 文件用 `-File` 跑。
+   反引号在 bash 里是命令替换、在 pwsh 里是转义符，内联执行十有八九会变形。
 
 ## 四、绝对不要做的事
 
@@ -98,7 +101,70 @@ powershell -ExecutionPolicy Bypass -File "<技能目录>\scripts\install.ps1"
 > jq 中文键名注意：裸字段名只支持 ASCII。中文键必须写 `jq '.["名称"]'`，
 > 直接写 `.名称` 会报 `INVALID_CHARACTER`（中文键名/含空格键名都要走 `["..."]` 写法）。
 
-## 六、文件清单
+## 六、反引号与特殊字符（AI 执行前必读）
+
+Windows 上 AI 生成的命令要经过两个 shell，反引号在两边都是雷，而且含义相反：
+
+| shell | 反引号的含义 | 后果 |
+|---|---|---|
+| bash / Git Bash / MSYS2 | 命令替换 | 反引号里的内容先执行，输出再塞回命令行；落单的反引号报 unmatched，或把后半段整个吞掉 |
+| pwsh 7.x | 转义符 | 吞掉后面一个字符（`n 变成换行），行尾的反引号是续行 |
+
+**规则（照抄即可）：**
+
+| 你要做的事 | 别这么写 | 这么写 |
+|---|---|---|
+| 命令替换 | `` echo `date` `` | `echo $(date)` |
+| 字面反引号 | `` echo "a`b" `` | `echo 'a`b'`（单引号里两个 shell 都当字面量） |
+| 写含反引号的文件（markdown / 脚本） | `cat <<EOF ... EOF` | `cat <<'EOF' ... EOF`（分隔符加单引号） |
+| 把命令交给 pwsh | `pwsh -Command "...`..."` | `pwsh -Command '...`...'`（单引号），或写成 .ps1 后用 `-File` |
+| 长命令 / 引号嵌套 | `-Command` 内联 | 写成 `.ps1` 文件再 `pwsh -File`（同第三节第 2 条） |
+
+**拿不准就先过一遍守卫**（只读诊断，不改系统任何东西）：
+
+```powershell
+# 首选：会话内直调（任何父进程下引号都完全保真）
+& "<技能目录>\scripts\shell-guard.ps1" -Text '要检查的命令'
+# 跨进程：在 pwsh 7 会话里转发，或由外部直接启动 pwsh（引号保真）
+pwsh -NoProfile -ExecutionPolicy Bypass -File "<技能目录>\scripts\shell-guard.ps1" -Text '要检查的命令'
+pwsh -NoProfile -ExecutionPolicy Bypass -File "<技能目录>\scripts\shell-guard.ps1" -File .\build.ps1
+```
+
+**参数是 `-Text` 而不是 `-Command`**：后者会撞上 powershell.exe 自身的 `-Command` 开关，
+转发时参数被截获错位。
+
+**引号保真的硬结论（实测，5.1 与 pwsh 7 均验证）：**
+
+- 会话内 `&` 直调：**保真**（首选，任何父进程都成立）
+- 守卫的 `-Execute`：内部走 `-EncodedCommand`（Base64），**保真**
+- **任何 `-Command` 式跨进程转发一律丢内层双引号**（5.1 与 pwsh 7 实测均丢）——
+  `Write-Output "hello  world  spaced"` 会被拆成 3 个参数输出 3 行，`git commit -m "a  b"`
+  会变成另一条命令。这不是「次优但可用」的兜底，是失真路径
+- 5.1 做父进程转发时连守卫参数本身都会被切散 → 跨进程调用守卫一律用 pwsh 7 的 `-File`
+
+退出码：`0` 安全 / `1` 发现风险 / `2` 有风险拒绝执行（配合 `-Execute`）/ `3` 文件不存在。
+加 `-Execute` 会「先诊断再执行」，有风险默认拒绝，`-Force` 才放行；`-Shell pwsh` 可切换诊断口径。
+`-Execute` 里原生命令的非零退出码统一**归一为 1**（不精确透传，避免残余 `$LASTEXITCODE` 污染判断）。
+
+> 关键：从 bash 调守卫时 `-Text` 后面必须**用单引号**，否则反引号在到达守卫之前就被 bash 吃掉了。
+> 同理，任何含反引号的内容想原样落盘，都用带引号的 heredoc（`<<'EOF'`）。
+
+**在脚本里调用守卫函数**（dot-source 后可用）：默认 `$rc = Invoke-SafeCommand -Command '...'`
+返回**只有 int 退出码**（输出显示在控制台）；要拿输出用 `-Capture`，此时输出走管道、
+退出码在 `$GuardLastExitCode`。两种模式互斥，不会把输出和退出码混成一个数组。
+子进程 stderr 形如 `[stderr] 原文`（单行，不掺 stdout）。别写 `exit (Invoke-SafeCommand ...)`。
+
+**其他高频坑（守卫诊断时也会顺带提醒）：**
+
+| 坑 | 现象 | 正确写法 |
+|---|---|---|
+| bash 里写 Windows 路径 | `cd C:\Users\x` 的反斜杠被当转义符吃掉，实际执行 `cd C:Usersx` | `cd 'C:\Users\x'`（单引号）或 `cd C:/Users/x`（正斜杠 Windows 也认） |
+| 5.1 里用 curl | `curl https://...` 实际是 Invoke-WebRequest 的别名，参数全对不上 | 写 `curl.exe`（pwsh 7 无此问题） |
+| 5.1 里用 `&&` / `\|\|` / 三元 | 直接报「token && 不是有效的语句元素」 | 用 pwsh 7 执行；或 `cmd1; if ($LASTEXITCODE -eq 0) { cmd2 }` |
+| 5.1 里写文件 | `Out-File` / `>` 默认 UTF-16，bash、python 读到全是乱码 | 显式加 `-Encoding utf8`，或用 pwsh 7（默认 UTF-8） |
+| 判断上一条命令成败 | `$?` 是布尔不是退出码；`$LASTEXITCODE` 会残留上一次的值 | 用 `$LASTEXITCODE` 判断原生 exe；用前先 `$LASTEXITCODE = 0` 清零 |
+
+## 七、文件清单
 
 ```
 SKILL.md                          本文件
@@ -107,7 +173,8 @@ scripts/install.ps1               主安装器（幂等，跨机器）
 scripts/setup-defaults.ps1        默认化（profile/注册表/文件关联/快捷方式/终端/VSCode）
 scripts/verify.ps1                体检脚本，输出诊断报告
 scripts/wt-config.ps1             WT/VSCode 配置的文本级改写（保留注释，可被测试单独调用）
-scripts/smoke-test.ps1            40 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
+scripts/shell-guard.ps1           反引号/特殊字符守卫（bash 命令替换与 pwsh 转义符诊断 + 安全改写 + 执行拦截）
+scripts/smoke-test.ps1            61 项回归测试（隔离沙箱，不碰系统配置，退出码可接 CI）
 references/troubleshooting.md     踩坑与排错
 CHANGELOG.md                      版本记录
 ```
@@ -115,14 +182,14 @@ CHANGELOG.md                      版本记录
 遇到报错或结果不符合预期时，先读 @references/troubleshooting.md，里面有逐条现象与处置办法
 （`pwsh` 找不到、中文仍乱码、双击 `.ps1` 没反应、镜像下载卡住、Windows Terminal 没跟着切等）。
 
-## 七、给终端用户的三步说明
+## 八、给终端用户的三步说明
 
 1. 打开 PowerShell，执行：
    `powershell -ExecutionPolicy Bypass -File "脚本路径\install.ps1"`
 2. 重启终端 / 常用应用（PATH 才会刷新）
 3. 验证：`pwsh -v` 应显示 7.x；`rg --version` 应显示 ripgrep
 
-## 八、这个技能会改动什么（知情同意）
+## 九、这个技能会改动什么（知情同意）
 
 安装过程全部在**当前用户**范围内，不需要管理员权限，不触碰 `HKEY_LOCAL_MACHINE`，也不会改动系统区域设置（不改 `ACP`）。
 

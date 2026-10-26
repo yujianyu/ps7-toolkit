@@ -60,6 +60,44 @@ A: jq 的裸字段名（`.名称`）只支持 ASCII，中文键名必须走括�
 `jq -r '.["名称"]'`（英文双引号包住键名）。中文**值**不受影响，`jq -r .name` 读到中文值是正常的。
 AI 助手生成过滤器时最容易写成 `.名称`，报这个错先检查是不是中文键名没用 `["..."]`。
 
+## Q: 命令里的反引号被吃掉了 / 报错 unmatched / 写出来的文件缺了反引号？
+A: 反引号在 bash（Git Bash / MSYS2）里是**命令替换**，在 pwsh 里是**转义符**，两个 shell 都会先动它：
+- bash：`` echo `date` `` 里的 `date` 会被真的执行，输出塞回命令行；落单的反引号报
+  `unmatched` 或把后半段吞掉；`cat <<EOF` 未加引号时，正文里的反引号和 `$` 会被展开后再落盘。
+- pwsh：反引号吞掉后面一个字符，`"a`nb"` 会变成换行，行尾的反引号是续行。
+
+处理：① 命令替换写 `$(date)`；② 字面反引号放单引号 `'...`...'`；
+③ 写文件用带引号的 heredoc：`cat <<'EOF' ... EOF`；④ 拿不准先跑
+`scripts\shell-guard.ps1 -Text '...'` 让它诊断（退出码 0 安全 / 1 有风险）。
+从 bash 调守卫时 `-Text` 后面必须**用单引号**，否则反引号到不了守卫就被吃掉了。
+
+## Q: bash 里 `cd C:\Users\x` 报找不到目录，或路径诡异地变了？
+
+反斜杠在 bash（引号外）是转义符，会被吃掉：`C:\Users\x` 实际变成 `C:Usersx`。
+写法二选一：整段路径放进**单引号** `cd 'C:\Users\x'`，或改用**正斜杠** `cd C:/Users/x`（Windows 程序也认）。
+执行前可先过守卫：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\shell-guard.ps1 -Text 'cd C:\Users\x'`，它会指出每一处被吃掉反斜杠的路径。
+
+## Q: 在 Windows PowerShell 5.1 里 `curl`、`&&`、写文件都表现异常？
+
+三个都是 5.1 的老问题，pwsh 7 全部没有：
+
+- `curl` 在 5.1 是 Invoke-WebRequest 的**别名**，参数跟真 curl 完全不同 → 写 `curl.exe`
+- `&&` / `||` / 三元 `?:` 在 5.1 直接报「token && 不是有效的语句元素」→ 用 pwsh 7 跑，或写成 `cmd1; if ($LASTEXITCODE -eq 0) { cmd2 }`
+- `Out-File` / `>` 在 5.1 默认 **UTF-16**，bash、python 读到全是乱码 → 显式加 `-Encoding utf8`，或用 pwsh 7（默认 UTF-8）
+
+另外判断上一条命令成败要用 `$LASTEXITCODE`（原生 exe），它不会自动清零，用前先置 0；`$?` 只是布尔值。
+守卫会顺带提醒这些：`pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\shell-guard.ps1 -Shell pwsh -Text 'curl https://example.com'`。
+
+> 守卫参数是 `-Text`（不是 `-Command`，避免撞上 powershell.exe 自身开关）。跨进程调守卫请用
+> pwsh 7 的 `-File`；**任何 `-Command` 式跨进程转发都丢内层双引号（5.1 与 pwsh 7 实测均丢）**。
+
+## Q: 明明写的是 `git commit -m "a  b"`，提交信息却变成好几段？
+
+跨进程 `-Command` 转发会丢内层双引号：命令行在 argv 层被重新切分，`"a  b"` 变成两个独立参数——
+**你看到的命令和实际执行的不是同一条**（5.1 与 pwsh 7 实测都丢，与版本无关）。
+规避写法：在会话内直接执行；或写进 `.ps1` 用 `-File` 跑；程序化调用一律走
+`-EncodedCommand`（Base64 UTF-16LE，本工具守卫的 `-Execute` 内部就是这么做的）。
+
 ## Q: 怎么彻底卸载？
 A:
 1. `& "$env:LOCALAPPDATA\ps7-toolkit\scripts\verify.ps1"` 先看现状

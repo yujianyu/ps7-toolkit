@@ -177,9 +177,17 @@ if ($SkipDefaults) {
         if (-not (Test-Path $exp)) { $dead += $e }
     }
     if ($dead.Count -gt 0) {
-        Write-Host ("    [!] 用户 PATH 里有 {0} 项指向不存在的目录：" -f $dead.Count) -ForegroundColor Yellow
-        foreach ($e in $dead) { Write-Host "        - $e" -ForegroundColor DarkYellow }
-        Write-Host "        （不影响使用，重跑 setup-defaults.ps1 会自动清掉属于本工具的旧路径）" -ForegroundColor DarkGray
+        Write-Host ("    [!] 用户 PATH 里有 {0} 项指向不存在的目录（死链，不影响使用）：" -f $dead.Count) -ForegroundColor Yellow
+        $own = @($dead | Where-Object { $_ -like '*ps7-toolkit*' })
+        $other = @($dead | Where-Object { $_ -notlike '*ps7-toolkit*' })
+        if ($own.Count -gt 0) {
+            Write-Host "        属于本工具的失效路径（重跑 setup-defaults.ps1 会自动清掉）：" -ForegroundColor DarkGray
+            foreach ($e in $own) { Write-Host "          - $e" -ForegroundColor DarkGray }
+        }
+        if ($other.Count -gt 0) {
+            Write-Host "        第三方路径失效（本工具不会动它，需你自行决定是否手动清理）：" -ForegroundColor DarkGray
+            foreach ($e in $other) { Write-Host "          - $e" -ForegroundColor DarkGray }
+        }
     }
 }
 
